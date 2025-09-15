@@ -27,7 +27,7 @@ async def fetch_due_actions() -> List[Dict[str, Any]]:
     """
     sql = """
     select *
-    from dev_education.v_due_actions
+    from dev_nexus.v_due_actions
     order by next_run_at nulls last
     """
     pool = _pool_required()
@@ -45,8 +45,8 @@ async def fetch_due_sms() -> List[Dict[str, Any]]:
         a.org_id,
         a.enrollment_id,
         a.generated_message
-    from dev_education.campaign_activities a
-    join dev_education.campaign_enrollments e on e.id = a.enrollment_id
+    from dev_nexus.campaign_activities a
+    join dev_nexus.campaign_enrollments e on e.id = a.enrollment_id
     where a.channel = 'sms'
       and a.status  = 'planned'
       and a.scheduled_at <= now()
@@ -61,14 +61,14 @@ async def fetch_due_sms() -> List[Dict[str, Any]]:
 
 async def insert_activity(activity: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Dynamic insert into dev_education.campaign_activities.
+    Dynamic insert into dev_nexus.campaign_activities.
     Returns the inserted row (at least the id).
     """
     cols = list(activity.keys())
     vals = [activity[c] for c in cols]
     placeholders = [f"${i}" for i in range(1, len(cols) + 1)]
     sql = f"""
-      insert into dev_education.campaign_activities ({', '.join(cols)})
+      insert into dev_nexus.campaign_activities ({', '.join(cols)})
       values ({', '.join(placeholders)})
       returning id
     """
@@ -92,7 +92,7 @@ async def update_activity(activity_id, patch: Dict[str, Any]) -> None:
         i += 1
     vals.append(activity_id)
     sql = f"""
-      update dev_education.campaign_activities
+      update dev_nexus.campaign_activities
          set {', '.join(sets)}
        where id = ${i}
     """
@@ -110,7 +110,7 @@ async def upsert_staging(row: Dict[str, Any]) -> Dict[str, Any]:
     updates = ", ".join([f"{c}=excluded.{c}" for c in cols if c != "id"])
 
     sql = f"""
-      insert into dev_education.phone_call_logs_stg ({', '.join(cols)})
+      insert into dev_nexus.phone_call_logs_stg ({', '.join(cols)})
       values ({', '.join(placeholders)})
       on conflict (call_id) do update
          set {updates}
@@ -125,10 +125,10 @@ async def upsert_staging(row: Dict[str, Any]) -> Dict[str, Any]:
 
 async def rpc_ingest_phone_logs(max_rows: int = 100) -> int:
     """
-    SELECT dev_education.usp_IngestPhoneCallLogs(p_max_rows := $1);
+    SELECT dev_nexus.usp_IngestPhoneCallLogs(p_max_rows := $1);
     Returns number of rows processed.
     """
-    sql = "select dev_education.usp_ingestphonecalllogs($1)"
+    sql = "select dev_nexus.usp_ingestphonecalllogs($1)"
     pool = _pool_required()
     async with pool.acquire() as conn:
         rec = await conn.fetchval(sql, max_rows)
