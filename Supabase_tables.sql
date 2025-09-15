@@ -147,6 +147,10 @@ create table if not exists dev_nexus.phone_call_logs_stg(
 );
 create index if not exists ix_phone_stg_unprocessed on dev_nexus.phone_call_logs_stg(processed, id);
 
+create unique index if not exists ux_activities_provider_call_id
+on dev_nexus.campaign_activities(provider_call_id)
+where provider_call_id is not null;
+
 create table if not exists dev_nexus.phone_log_decisions(
   status text not null,
   end_call_reason text not null,
