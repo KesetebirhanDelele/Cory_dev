@@ -1,51 +1,69 @@
--- Schema
-create schema if not exists dev_education;
+-- =========================================================
+-- dev_nexus bootstrap for Cory_dev (idempotent)
+-- Run in Supabase SQL Editor (correct project)
+-- =========================================================
 
--- Helpful extensions
-create extension if not exists pgcrypto; -- gen_random_uuid()
+-- 0) Schema + extension
+create schema if not exists dev_nexus;
+create extension if not exists pgcrypto; -- for gen_random_uuid()
+set search_path to dev_nexus, public;
 
--- Core tables
-create table if not exists dev_education.organizations(
+-- 1) Core tables
+create table if not exists dev_nexus.organizations(
   id uuid primary key default gen_random_uuid(),
   name text not null,
   created_at timestamptz not null default now()
 );
 
-create table if not exists dev_education.contacts(
+create table if not exists dev_nexus.contacts(
   id uuid primary key default gen_random_uuid(),
-  org_id uuid not null references dev_education.organizations(id),
-  full_name text,
-  email text,
-  phone text,
+  org_id uuid not null references dev_nexus.organizations(id),
+  first_name text,
+  last_name  text,
+  full_name  text,
+  email      text,
+  phone      text,
   created_at timestamptz not null default now()
 );
 
-create table if not exists dev_education.campaigns(
+create table if not exists dev_nexus.campaigns(
   id uuid primary key default gen_random_uuid(),
-  org_id uuid not null references dev_education.organizations(id),
+  org_id uuid not null references dev_nexus.organizations(id),
   name text not null,
   description text,
   overall_goal_prompt text,
+  goal_prompt         text,
+  campaign_type       text,
   created_at timestamptz not null default now()
 );
 
-create table if not exists dev_education.campaign_steps(
+-- Optional check constraint on campaign_type
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname='ck_campaigns_campaign_type') then
+    alter table dev_nexus.campaigns
+      add constraint ck_campaigns_campaign_type
+      check (campaign_type in ('live','draft') or campaign_type is null);
+  end if;
+end$$;
+
+create table if not exists dev_nexus.campaign_steps(
   id uuid primary key default gen_random_uuid(),
-  campaign_id uuid not null references dev_education.campaigns(id),
+  campaign_id uuid not null references dev_nexus.campaigns(id),
   order_id int not null,
   channel text not null check (channel in ('voice','sms','email')),
   wait_before_ms bigint not null default 0,
   label text,
   metadata jsonb default '{}'::jsonb
 );
-create index if not exists ix_steps_campaign_order on dev_education.campaign_steps(campaign_id, order_id);
+create index if not exists ix_steps_campaign_order on dev_nexus.campaign_steps(campaign_id, order_id);
 
-create table if not exists dev_education.campaign_enrollments(
+create table if not exists dev_nexus.campaign_enrollments(
   id uuid primary key default gen_random_uuid(),
-  org_id uuid not null references dev_education.organizations(id),
-  contact_id uuid not null references dev_education.contacts(id),
-  campaign_id uuid not null references dev_education.campaigns(id),
-  current_step_id uuid references dev_education.campaign_steps(id),
+  org_id uuid not null references dev_nexus.organizations(id),
+  contact_id uuid not null references dev_nexus.contacts(id),
+  campaign_id uuid not null references dev_nexus.campaigns(id),
+  current_step_id uuid references dev_nexus.campaign_steps(id),
   next_channel text check (next_channel in ('voice','sms','email')),
   next_run_at timestamptz,
   status text not null default 'active' check (status in ('active','paused','completed','switched','cancelled')),
@@ -56,15 +74,15 @@ create table if not exists dev_education.campaign_enrollments(
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index if not exists ix_enroll_next on dev_education.campaign_enrollments(next_channel, next_run_at) where status='active';
-create index if not exists ix_enroll_contact_active on dev_education.campaign_enrollments(org_id, contact_id) where status='active';
+create index if not exists ix_enroll_next on dev_nexus.campaign_enrollments(next_channel, next_run_at) where status='active';
+create index if not exists ix_enroll_contact_active on dev_nexus.campaign_enrollments(org_id, contact_id) where status='active';
 
-create table if not exists dev_education.campaign_activities(
+create table if not exists dev_nexus.campaign_activities(
   id uuid primary key default gen_random_uuid(),
-  org_id uuid not null references dev_education.organizations(id),
-  enrollment_id uuid not null references dev_education.campaign_enrollments(id),
-  campaign_id uuid not null references dev_education.campaigns(id),
-  step_id uuid references dev_education.campaign_steps(id),
+  org_id uuid not null references dev_nexus.organizations(id),
+  enrollment_id uuid not null references dev_nexus.campaign_enrollments(id),
+  campaign_id uuid not null references dev_nexus.campaigns(id),
+  step_id uuid references dev_nexus.campaign_steps(id),
   attempt_no int,
   channel text not null check (channel in ('voice','sms','email')),
   status text not null check (status in ('planned','completed','failed')),
@@ -96,10 +114,10 @@ create table if not exists dev_education.campaign_activities(
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index if not exists ix_activities_sms_due on dev_education.campaign_activities(channel, status, scheduled_at);
+create index if not exists ix_activities_sms_due on dev_nexus.campaign_activities(channel, status, scheduled_at);
 
--- Staging + decisions
-create table if not exists dev_education.phone_call_logs_stg(
+-- 2) Staging & policy tables
+create table if not exists dev_nexus.phone_call_logs_stg(
   id bigserial primary key,
   enrollment_id uuid,
   contact_id uuid,
@@ -127,10 +145,9 @@ create table if not exists dev_education.phone_call_logs_stg(
   processed_at timestamptz,
   error_msg text
 );
-create index if not exists ix_phone_stg_unprocessed on dev_education.phone_call_logs_stg(processed, id);
+create index if not exists ix_phone_stg_unprocessed on dev_nexus.phone_call_logs_stg(processed, id);
 
--- Global defaults (uses 'ANY' sentinel)
-create table if not exists dev_education.phone_log_decisions(
+create table if not exists dev_nexus.phone_log_decisions(
   status text not null,
   end_call_reason text not null,
   is_connected boolean not null,
@@ -143,9 +160,8 @@ create table if not exists dev_education.phone_log_decisions(
   primary key(status, end_call_reason)
 );
 
--- Per-campaign policy override
-create table if not exists dev_education.campaign_call_policies(
-  campaign_id uuid not null references dev_education.campaigns(id),
+create table if not exists dev_nexus.campaign_call_policies(
+  campaign_id uuid not null references dev_nexus.campaigns(id),
   status text not null,
   end_call_reason text not null,
   is_connected boolean not null,
@@ -157,12 +173,11 @@ create table if not exists dev_education.campaign_call_policies(
   align_same_time boolean not null,
   primary key(campaign_id, status, end_call_reason)
 );
-create index if not exists ix_campaign_policy_lookup on dev_education.campaign_call_policies(campaign_id, status, end_call_reason);
+create index if not exists ix_campaign_policy_lookup on dev_nexus.campaign_call_policies(campaign_id, status, end_call_reason);
 
--- Prompts
-create table if not exists dev_education.prompt_templates(
+create table if not exists dev_nexus.prompt_templates(
   id uuid primary key default gen_random_uuid(),
-  org_id uuid not null references dev_education.organizations(id),
+  org_id uuid not null references dev_nexus.organizations(id),
   name text not null,
   channel text not null check (channel in ('voice','sms','email')),
   purpose text,
@@ -170,23 +185,112 @@ create table if not exists dev_education.prompt_templates(
   created_at timestamptz not null default now()
 );
 
--- Views
-create or replace view dev_education.v_due_sms_followups as
-select a.id as activity_id, a.org_id, a.enrollment_id, a.campaign_id, a.step_id,
-       a.channel, a.status, a.scheduled_at, e.contact_id
-from dev_education.campaign_activities a
-join dev_education.campaign_enrollments e on e.id = a.enrollment_id
+-- 3) Views used by your jobs
+create or replace view dev_nexus.v_due_sms_followups as
+select
+  a.id               as activity_id,
+  a.org_id,
+  a.enrollment_id,
+  a.campaign_id,
+  a.step_id,
+  a.channel,
+  a.status,
+  a.scheduled_at,
+  a.generated_message,
+  e.contact_id
+from dev_nexus.campaign_activities a
+join dev_nexus.campaign_enrollments e on e.id = a.enrollment_id
 where a.channel='sms' and a.status='planned'
   and a.scheduled_at is not null and a.scheduled_at <= now();
 
-create or replace view dev_education.v_due_actions as
+create or replace view dev_nexus.v_due_actions as
 select e.id as enrollment_id, e.org_id, e.contact_id, e.campaign_id,
        e.current_step_id, e.next_channel, e.next_run_at
-from dev_education.campaign_enrollments e
+from dev_nexus.campaign_enrollments e
 where e.status='active' and e.next_run_at is not null and e.next_run_at <= now();
 
-create or replace view dev_education.v_due_waits as
+create or replace view dev_nexus.v_due_waits as
 select e.*, c.name as campaign_name
-from dev_education.campaign_enrollments e
-join dev_education.campaigns c on c.id = e.campaign_id
+from dev_nexus.campaign_enrollments e
+join dev_nexus.campaigns c on c.id = e.campaign_id
 where e.status='active' and e.next_run_at is not null;
+
+-- 4) Backfills / sensible defaults
+-- Default campaign_type if missing
+update dev_nexus.campaigns set campaign_type = coalesce(campaign_type, 'live');
+
+-- If you previously used overall_goal_prompt, copy into goal_prompt when empty
+update dev_nexus.campaigns
+   set goal_prompt = coalesce(goal_prompt, overall_goal_prompt)
+ where goal_prompt is null;
+
+-- Seed a demo org if none exists (your seed script expects at least one)
+insert into dev_nexus.organizations (name)
+select 'Demo Org' where not exists (select 1 from dev_nexus.organizations);
+
+-- Seed a few default phone decision rules (safe upserts)
+insert into dev_nexus.phone_log_decisions
+(status, end_call_reason, is_connected, should_retry, retry_sms, first_retry_mins, next_retry_mins, max_retry_days, align_same_time)
+values
+('failed','no_answer', false, true,  false, 10, 30, 2, true),
+('failed','busy',      false, true,  false, 10, 30, 2, true),
+('failed','failed',    false, true,  false, 15, 60, 2, true),
+('completed','completed', true, false, false, 0, 0, 0, false)
+on conflict (status, end_call_reason) do nothing;
+
+-- 5) Auto-touch updated_at on BASE TABLES only (skip views)
+create or replace function dev_nexus.touch_updated_at()
+returns trigger language plpgsql as $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = TG_TABLE_SCHEMA
+      and table_name   = TG_TABLE_NAME
+      and column_name  = 'updated_at'
+  ) then
+    new.updated_at := now();
+  end if;
+  return new;
+end$$;
+
+do $$
+declare r record;
+begin
+  for r in
+    select t.table_schema, t.table_name
+    from information_schema.tables t
+    where t.table_schema = 'dev_nexus'
+      and t.table_type   = 'BASE TABLE'
+      and exists (
+        select 1 from information_schema.columns c
+        where c.table_schema = t.table_schema
+          and c.table_name   = t.table_name
+          and c.column_name  = 'updated_at'
+      )
+  loop
+    execute format($f$
+      do $g$
+      begin
+        if not exists (select 1 from pg_trigger where tgname=%L) then
+          create trigger %I before update on %I.%I
+          for each row execute function dev_nexus.touch_updated_at();
+        end if;
+      end$g$;
+    $f$, 'trg_touch_'||r.table_name, 'trg_touch_'||r.table_name, r.table_schema, r.table_name);
+  end loop;
+end$$;
+
+-- 6) Privileges for server-side REST (service_role)
+grant usage on schema dev_nexus to service_role;
+grant select, insert, update, delete on all tables in schema dev_nexus to service_role;
+grant usage, select on all sequences in schema dev_nexus to service_role;
+grant execute on all functions in schema dev_nexus to service_role;
+
+alter default privileges in schema dev_nexus
+  grant select, insert, update, delete on tables to service_role;
+
+alter default privileges in schema dev_nexus
+  grant usage, select on sequences to service_role;
+
+-- 7) Ask PostgREST to reload schema cache (also click "Refresh schema cache" in Data API settings)
+select pg_notify('pgrst', 'reload schema');

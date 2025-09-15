@@ -1,5 +1,6 @@
 # call_processing_agent.py
-from db import sb
+# from db import sb
+from supabase_repo import sb
 from datetime import datetime, timezone, timedelta
 
 ANY = "ANY"
