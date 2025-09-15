@@ -1,14 +1,21 @@
--- =====================================================================================
--- Ensure schema exists
--- =====================================================================================
-create schema if not exists dev_education;
+-- =====================================================================
+-- dev_nexus RPCs & helpers (idempotent)
+-- Creates the functions used by your call processing flow.
+-- Run AFTER the base dev_nexus schema/tables exist.
+-- =====================================================================
 
--- =====================================================================================
--- Helper: resolve call policy (per-campaign override first, then global defaults)
--- Returns exactly one row with fully-coalesced values (safe defaults if nothing found)
--- =====================================================================================
-drop function if exists dev_education.fn_resolve_call_policy(uuid, text, text) cascade;
-create or replace function dev_education.fn_resolve_call_policy(
+create schema if not exists dev_nexus;
+
+-- 0) Make sure service_role will be able to run newly created functions
+grant execute on all functions in schema dev_nexus to service_role;
+alter default privileges in schema dev_nexus
+  grant execute on functions to service_role;
+
+-- ---------------------------------------------------------------------
+-- fn_resolve_call_policy(campaign_id, status, end_reason)
+-- ---------------------------------------------------------------------
+drop function if exists dev_nexus.fn_resolve_call_policy(uuid, text, text) cascade;
+create or replace function dev_nexus.fn_resolve_call_policy(
   p_campaign_id uuid,
   p_status      text,
   p_end_reason  text
@@ -27,7 +34,7 @@ stable
 as $$
   with c as (
     select *
-    from dev_education.campaign_call_policies
+    from dev_nexus.campaign_call_policies
     where campaign_id = p_campaign_id
       and (status = coalesce(p_status, 'ANY') or status = 'ANY')
       and (end_call_reason = coalesce(p_end_reason, 'ANY') or end_call_reason = 'ANY')
@@ -38,7 +45,7 @@ as $$
   ),
   g as (
     select *
-    from dev_education.phone_log_decisions
+    from dev_nexus.phone_log_decisions
     where (status = coalesce(p_status, 'ANY') or status = 'ANY')
       and (end_call_reason = coalesce(p_end_reason, 'ANY') or end_call_reason = 'ANY')
     order by
@@ -59,12 +66,11 @@ as $$
   left join g on true
 $$;
 
--- =====================================================================================
--- Helper: get next step (id, wait, channel) after current_step_id within a campaign
--- Returns 0 or 1 rows
--- =====================================================================================
-drop function if exists dev_education.fn_next_step(uuid, uuid) cascade;
-create or replace function dev_education.fn_next_step(
+-- ---------------------------------------------------------------------
+-- fn_next_step(campaign_id, current_step_id)
+-- ---------------------------------------------------------------------
+drop function if exists dev_nexus.fn_next_step(uuid, uuid) cascade;
+create or replace function dev_nexus.fn_next_step(
   p_campaign_id     uuid,
   p_current_step_id uuid
 )
@@ -74,12 +80,12 @@ stable
 as $$
   with cur as (
     select order_id
-    from dev_education.campaign_steps
+    from dev_nexus.campaign_steps
     where id = p_current_step_id
   ),
   nxt as (
     select id as step_id, wait_before_ms, channel
-    from dev_education.campaign_steps
+    from dev_nexus.campaign_steps
     where campaign_id = p_campaign_id
       and order_id > (select order_id from cur)
     order by order_id asc
@@ -88,13 +94,11 @@ as $$
   select * from nxt
 $$;
 
--- =====================================================================================
--- usp_EnrollContactIntoCampaign
--- Closes any existing active enrollment for (org, contact), picks entry step, sets next_run_at
--- RETURNS: enrollment_id (uuid)
--- =====================================================================================
-drop function if exists dev_education.usp_EnrollContactIntoCampaign(uuid, uuid, uuid, text) cascade;
-create or replace function dev_education.usp_EnrollContactIntoCampaign(
+-- ---------------------------------------------------------------------
+-- usp_EnrollContactIntoCampaign(...)
+-- ---------------------------------------------------------------------
+drop function if exists dev_nexus.usp_EnrollContactIntoCampaign(uuid, uuid, uuid, text) cascade;
+create or replace function dev_nexus.usp_EnrollContactIntoCampaign(
   p_org_id      uuid,
   p_contact_id  uuid,
   p_campaign_id uuid,
@@ -103,7 +107,7 @@ create or replace function dev_education.usp_EnrollContactIntoCampaign(
 returns uuid
 language plpgsql
 security definer
-set search_path = dev_education, public
+set search_path = dev_nexus, public
 as $$
 declare
   v_old_id    uuid;
@@ -113,9 +117,8 @@ declare
   v_next_run  timestamptz;
   v_new_id    uuid;
 begin
-  -- Close existing active
   select id into v_old_id
-  from dev_education.campaign_enrollments
+  from dev_nexus.campaign_enrollments
   where org_id = p_org_id
     and contact_id = p_contact_id
     and status = 'active'
@@ -123,7 +126,7 @@ begin
   limit 1;
 
   if v_old_id is not null then
-    update dev_education.campaign_enrollments
+    update dev_nexus.campaign_enrollments
        set status    = 'switched',
            ended_at  = now(),
            reason    = p_reason,
@@ -131,10 +134,9 @@ begin
      where id = v_old_id;
   end if;
 
-  -- Entry step: lowest order_id
   select id, channel, coalesce(wait_before_ms, 0)
     into v_step_id, v_channel, v_wait_ms
-  from dev_education.campaign_steps
+  from dev_nexus.campaign_steps
   where campaign_id = p_campaign_id
   order by order_id asc
   limit 1;
@@ -145,7 +147,7 @@ begin
 
   v_next_run := now() + (v_wait_ms::text || ' milliseconds')::interval;
 
-  insert into dev_education.campaign_enrollments
+  insert into dev_nexus.campaign_enrollments
     (org_id, contact_id, campaign_id, status, started_at,
      current_step_id, next_channel, next_run_at, created_at, updated_at)
   values
@@ -154,7 +156,7 @@ begin
   returning id into v_new_id;
 
   if v_old_id is not null then
-    update dev_education.campaign_enrollments
+    update dev_nexus.campaign_enrollments
        set switched_to_enrollment = v_new_id
      where id = v_old_id;
   end if;
@@ -163,13 +165,11 @@ begin
 end
 $$;
 
--- =====================================================================================
--- usp_ScheduleSmsAfterCall
--- Inserts a planned SMS activity for the current step of the active enrollment
--- RETURNS: activity_id (uuid) or NULL if enrollment not active
--- =====================================================================================
-drop function if exists dev_education.usp_ScheduleSmsAfterCall(uuid, text, text, timestamptz, text) cascade;
-create or replace function dev_education.usp_ScheduleSmsAfterCall(
+-- ---------------------------------------------------------------------
+-- usp_ScheduleSmsAfterCall(...)
+-- ---------------------------------------------------------------------
+drop function if exists dev_nexus.usp_ScheduleSmsAfterCall(uuid, text, text, timestamptz, text) cascade;
+create or replace function dev_nexus.usp_ScheduleSmsAfterCall(
   p_enrollment_id uuid,
   p_message       text default null,
   p_prompt_used   text default null,
@@ -179,13 +179,13 @@ create or replace function dev_education.usp_ScheduleSmsAfterCall(
 returns uuid
 language plpgsql
 security definer
-set search_path = dev_education, public
+set search_path = dev_nexus, public
 as $$
 declare
-  v_org_id     uuid;
-  v_campaign_id uuid;
-  v_step_id    uuid;
-  v_activity_id uuid;
+  v_org_id       uuid;
+  v_campaign_id  uuid;
+  v_step_id      uuid;
+  v_activity_id  uuid;
 begin
   if p_send_at is null then
     p_send_at := now();
@@ -193,17 +193,16 @@ begin
 
   select org_id, campaign_id, current_step_id
     into v_org_id, v_campaign_id, v_step_id
-  from dev_education.campaign_enrollments
+  from dev_nexus.campaign_enrollments
   where id = p_enrollment_id
     and status = 'active'
   limit 1;
 
   if v_org_id is null then
-    -- no-op for inactive/missing enrollment
     return null;
   end if;
 
-  insert into dev_education.campaign_activities
+  insert into dev_nexus.campaign_activities
     (org_id, enrollment_id, campaign_id, step_id, attempt_no, channel,
      status, scheduled_at, sent_at, delivered_at, completed_at,
      outcome, provider_ref, prompt_used, generated_message, ai_analysis,
@@ -225,14 +224,11 @@ begin
 end
 $$;
 
--- =====================================================================================
--- usp_IngestPhoneCallLogs
--- Consume up to p_max_rows rows from phone_call_logs_stg where processed=false
--- For each: log voice activity, apply policy, maybe schedule retry + SMS, or advance/complete
--- RETURNS: number of rows processed
--- =====================================================================================
-drop function if exists dev_education.usp_IngestPhoneCallLogs(int, int, boolean, int) cascade;
-create or replace function dev_education.usp_IngestPhoneCallLogs(
+-- ---------------------------------------------------------------------
+-- usp_IngestPhoneCallLogs(...)
+-- ---------------------------------------------------------------------
+drop function if exists dev_nexus.usp_IngestPhoneCallLogs(int, int, boolean, int) cascade;
+create or replace function dev_nexus.usp_IngestPhoneCallLogs(
   p_vm_retry_window_days   int default 4,
   p_vm_retry_interval_mins int default 1440,
   p_schedule_sms_on_retry  boolean default true,
@@ -241,7 +237,7 @@ create or replace function dev_education.usp_IngestPhoneCallLogs(
 returns int
 language plpgsql
 security definer
-set search_path = dev_education, public
+set search_path = dev_nexus, public
 as $$
 declare
   v_now           timestamptz := now();
@@ -277,7 +273,7 @@ declare
 begin
   for r in
     select *
-    from dev_education.phone_call_logs_stg
+    from dev_nexus.phone_call_logs_stg
     where processed = false
     order by id
     limit p_max_rows
@@ -287,41 +283,37 @@ begin
     v_contact_id    := r.contact_id;
     v_campaign_id   := r.campaign_id;
 
-    -- Resolve missing enrollment from active by contact
     if v_enrollment_id is null and v_contact_id is not null then
       select id, campaign_id into v_enrollment_id, v_campaign_id
-      from dev_education.campaign_enrollments
+      from dev_nexus.campaign_enrollments
       where contact_id = v_contact_id and status = 'active'
       order by started_at desc
       limit 1;
     end if;
 
-    -- Load enrollment state
     select org_id, current_step_id, started_at
       into v_org_id, v_step_id, v_started_at
-    from dev_education.campaign_enrollments
+    from dev_nexus.campaign_enrollments
     where id = v_enrollment_id and status = 'active'
     limit 1;
 
     if v_org_id is null then
-      update dev_education.phone_call_logs_stg
+      update dev_nexus.phone_call_logs_stg
          set processed = true, processed_at = v_now, error_msg = 'No active enrollment'
        where id = r.id;
       continue;
     end if;
 
-    -- current step order
     select s.order_id into v_order_id
-    from dev_education.campaign_steps s
+    from dev_nexus.campaign_steps s
     where s.id = v_step_id;
 
-    -- Log voice activity
     v_attempts := coalesce((
-      select count(*) from dev_education.campaign_activities
+      select count(*) from dev_nexus.campaign_activities
       where enrollment_id = v_enrollment_id and step_id = v_step_id and channel = 'voice'
     ),0) + 1;
 
-    insert into dev_education.campaign_activities
+    insert into dev_nexus.campaign_activities
       (org_id, enrollment_id, campaign_id, step_id, attempt_no, channel,
        status, scheduled_at, sent_at, delivered_at, completed_at,
        outcome, provider_ref, prompt_used, generated_message, ai_analysis,
@@ -338,17 +330,14 @@ begin
        coalesce(r.start_time, v_now), r.agent, r.timezone, r.phone_number_to, r.phone_number_from,
        r.status, r.campaign_type, v_now, v_now);
 
-    -- Policy decision
     select is_connected, should_retry, retry_sms,
            first_retry_mins, next_retry_mins, max_retry_days, align_same_time
-    into v_is_connected, v_should_retry, v_retry_sms,
-         v_first_retry_mins, v_next_retry_mins, v_max_retry_days, v_align_same_time
-    from dev_education.fn_resolve_call_policy(v_campaign_id, r.status, r.end_call_reason);
+      into v_is_connected, v_should_retry, v_retry_sms,
+           v_first_retry_mins, v_next_retry_mins, v_max_retry_days, v_align_same_time
+    from dev_nexus.fn_resolve_call_policy(v_campaign_id, r.status, r.end_call_reason);
 
-    -- Retry path
     if (not v_is_connected) and v_should_retry then
       if v_now < (v_started_at + (v_max_retry_days || ' days')::interval) then
-        -- choose minutes based on attempts
         if v_attempts <= 1 then
           v_next_run := v_now + (v_first_retry_mins || ' minutes')::interval;
         else
@@ -357,7 +346,7 @@ begin
 
         if v_align_same_time then
           select call_started_at into v_first_call_ts
-          from dev_education.campaign_activities
+          from dev_nexus.campaign_activities
           where enrollment_id = v_enrollment_id and step_id = v_step_id and channel = 'voice'
           order by call_started_at asc
           limit 1;
@@ -371,49 +360,46 @@ begin
           end if;
         end if;
 
-        update dev_education.campaign_enrollments
+        update dev_nexus.campaign_enrollments
            set next_channel = 'voice',
                next_run_at  = v_next_run,
                updated_at   = v_now
          where id = v_enrollment_id;
 
         if p_schedule_sms_on_retry and v_retry_sms then
-          perform dev_education.usp_ScheduleSmsAfterCall(v_enrollment_id, null, null, v_now, null);
+          perform dev_nexus.usp_ScheduleSmsAfterCall(v_enrollment_id, null, null, v_now, null);
         end if;
 
-        update dev_education.phone_call_logs_stg
+        update dev_nexus.phone_call_logs_stg
            set processed = true, processed_at = v_now, error_msg = null
          where id = r.id;
 
         v_rows := v_rows + 1;
         continue;
       end if;
-      -- else: retry window over → fallthrough to classification/advance
     end if;
 
-    -- Connected or window expired: use classification
     v_class := coalesce(r.classification, 'followup');
 
     if v_class in ('booked','appointment_booked','cold','not_interested','dnc') then
-      update dev_education.campaign_enrollments
+      update dev_nexus.campaign_enrollments
          set status = 'completed', ended_at = v_now,
              current_step_id = null, next_channel = null, next_run_at = null,
              updated_at = v_now
        where id = v_enrollment_id;
     else
-      -- advance to next step
       select step_id, wait_before_ms, channel
         into v_next_step_id, v_next_wait_ms, v_next_channel
-      from dev_education.fn_next_step(v_campaign_id, v_step_id);
+      from dev_nexus.fn_next_step(v_campaign_id, v_step_id);
 
       if v_next_step_id is null then
-        update dev_education.campaign_enrollments
+        update dev_nexus.campaign_enrollments
            set status = 'completed', ended_at = v_now,
                current_step_id = null, next_channel = null, next_run_at = null,
                updated_at = v_now
          where id = v_enrollment_id;
       else
-        update dev_education.campaign_enrollments
+        update dev_nexus.campaign_enrollments
            set current_step_id = v_next_step_id,
                next_channel    = v_next_channel,
                next_run_at     = v_now + (coalesce(v_next_wait_ms,0)::text || ' milliseconds')::interval,
@@ -422,7 +408,7 @@ begin
       end if;
     end if;
 
-    update dev_education.phone_call_logs_stg
+    update dev_nexus.phone_call_logs_stg
        set processed = true, processed_at = v_now, error_msg = null
      where id = r.id;
 
@@ -433,17 +419,15 @@ begin
 end
 $$;
 
--- =====================================================================================
--- usp_LogVoiceCallAndAdvance
--- Convenience wrapper: write one call log into staging, then immediately ingest (1 row)
--- RETURNS: staging row id (bigint)
--- =====================================================================================
-drop function if exists dev_education.usp_LogVoiceCallAndAdvance(
+-- ---------------------------------------------------------------------
+-- usp_LogVoiceCallAndAdvance(...)
+-- ---------------------------------------------------------------------
+drop function if exists dev_nexus.usp_LogVoiceCallAndAdvance(
   uuid, text, text, int, text, jsonb, jsonb, text, text, timestamptz,
   text, text, text, text, text, text, text
 ) cascade;
 
-create or replace function dev_education.usp_LogVoiceCallAndAdvance(
+create or replace function dev_nexus.usp_LogVoiceCallAndAdvance(
   p_enrollment_id      uuid,
   p_provider_call_id   text,
   p_provider_module_id text,
@@ -460,27 +444,26 @@ create or replace function dev_education.usp_LogVoiceCallAndAdvance(
   p_phone_from         text,
   p_call_status        text,
   p_campaign_type      text,
-  p_outcome            text,     -- optional semantic outcome; stored in activity.outcome by ingest
-  p_classification     text      -- optional: booked/cold/followup...
+  p_outcome            text,
+  p_classification     text
 )
 returns bigint
 language plpgsql
 security definer
-set search_path = dev_education, public
+set search_path = dev_nexus, public
 as $$
 declare
   v_contact_id   uuid;
   v_campaign_id  uuid;
   v_id           bigint;
 begin
-  -- resolve contact + campaign for convenience
   select contact_id, campaign_id
     into v_contact_id, v_campaign_id
-  from dev_education.campaign_enrollments
+  from dev_nexus.campaign_enrollments
   where id = p_enrollment_id
   limit 1;
 
-  insert into dev_education.phone_call_logs_stg
+  insert into dev_nexus.phone_call_logs_stg
     (enrollment_id, contact_id, campaign_id, type_of_call,
      call_id, module_id, duration_seconds, end_call_reason,
      executed_actions, prompt_variables, recording_url, transcript,
@@ -496,9 +479,11 @@ begin
      p_classification, null, false, null, null)
   returning id into v_id;
 
-  -- Immediately process 1 row
-  perform dev_education.usp_IngestPhoneCallLogs(4, 1440, true, 1);
+  perform dev_nexus.usp_IngestPhoneCallLogs(4, 1440, true, 1);
 
   return v_id;
 end
 $$;
+
+-- Ask PostgREST to reload its schema cache
+select pg_notify('pgrst', 'reload schema');
