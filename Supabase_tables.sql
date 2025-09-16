@@ -298,3 +298,34 @@ alter default privileges in schema dev_nexus
 
 -- 7) Ask PostgREST to reload schema cache (also click "Refresh schema cache" in Data API settings)
 select pg_notify('pgrst', 'reload schema');
+
+-- View of planned email activities that are due now
+create or replace view dev_nexus.v_due_email_followups as
+select
+  a.id              as activity_id,
+  a.org_id,
+  a.enrollment_id,
+  a.campaign_id,
+  a.step_id,
+  a.channel,
+  a.status,
+  a.scheduled_at,
+  a.generated_message,
+  e.contact_id,
+  c.email           as contact_email,
+  c.first_name,
+  c.last_name
+from dev_nexus.campaign_activities a
+join dev_nexus.campaign_enrollments e on e.id = a.enrollment_id
+join dev_nexus.contacts c            on c.id = e.contact_id
+where a.channel = 'email'
+  and a.status  = 'planned'
+  and a.scheduled_at is not null
+  and a.scheduled_at <= now()
+  and coalesce(c.email, '') <> '';
+
+-- (optional) easy button: let service_role SELECT it explicitly
+grant select on dev_nexus.v_due_email_followups to service_role;
+
+-- Ask PostgREST to refresh its cache so REST sees the new view
+select pg_notify('pgrst', 'reload schema');
