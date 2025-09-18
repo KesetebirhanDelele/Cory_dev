@@ -13,7 +13,10 @@ SCHEMA = "dev_nexus"
 db = sb.postgrest.schema(SCHEMA)
 
 # ---------- tiny assert helpers ----------
-class TestFail(Exception): pass
+class TestFail(Exception): 
+    __test__ = False
+    pass
+
 def require(cond: bool, msg: str):
     if not cond: raise TestFail(msg)
 

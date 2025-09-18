@@ -37,6 +37,17 @@ create table if not exists dev_nexus.campaigns(
   created_at timestamptz not null default now()
 );
 
+-- NEW: add updated_at to campaigns (idempotent)
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema='dev_nexus' and table_name='campaigns' and column_name='updated_at'
+  ) then
+    alter table dev_nexus.campaigns add column updated_at timestamptz not null default now();
+  end if;
+end$$;
+
 -- Optional check constraint on campaign_type
 do $$
 begin
@@ -57,6 +68,46 @@ create table if not exists dev_nexus.campaign_steps(
   metadata jsonb default '{}'::jsonb
 );
 create index if not exists ix_steps_campaign_order on dev_nexus.campaign_steps(campaign_id, order_id);
+
+-- NEW: add goal_prompt to campaign_steps to match builder code
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema='dev_nexus' and table_name='campaign_steps' and column_name='goal_prompt'
+  ) then
+    alter table dev_nexus.campaign_steps add column goal_prompt text;
+  end if;
+end$$;
+
+-- NEW: add created_at/updated_at to campaign_steps so trigger can auto-touch
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema='dev_nexus' and table_name='campaign_steps' and column_name='created_at'
+  ) then
+    alter table dev_nexus.campaign_steps add column created_at timestamptz not null default now();
+  end if;
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema='dev_nexus' and table_name='campaign_steps' and column_name='updated_at'
+  ) then
+    alter table dev_nexus.campaign_steps add column updated_at timestamptz not null default now();
+  end if;
+end$$;
+
+-- (optional) keep steps in order unique per campaign
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname='ux_campaign_steps_unique_order'
+  ) then
+    alter table dev_nexus.campaign_steps
+      add constraint ux_campaign_steps_unique_order unique (campaign_id, order_id);
+  end if;
+end$$;
 
 create table if not exists dev_nexus.campaign_enrollments(
   id uuid primary key default gen_random_uuid(),
@@ -220,7 +271,6 @@ join dev_nexus.campaigns c on c.id = e.campaign_id
 where e.status='active' and e.next_run_at is not null;
 
 -- 4) Backfills / sensible defaults
--- Default campaign_type if missing
 update dev_nexus.campaigns set campaign_type = coalesce(campaign_type, 'live');
 
 -- If you previously used overall_goal_prompt, copy into goal_prompt when empty
@@ -228,11 +278,11 @@ update dev_nexus.campaigns
    set goal_prompt = coalesce(goal_prompt, overall_goal_prompt)
  where goal_prompt is null;
 
--- Seed a demo org if none exists (your seed script expects at least one)
+-- Seed a demo org if none exists (tests expect at least one)
 insert into dev_nexus.organizations (name)
 select 'Demo Org' where not exists (select 1 from dev_nexus.organizations);
 
--- Seed a few default phone decision rules (safe upserts)
+-- Seed default phone decision rules (safe upserts)
 insert into dev_nexus.phone_log_decisions
 (status, end_call_reason, is_connected, should_retry, retry_sms, first_retry_mins, next_retry_mins, max_retry_days, align_same_time)
 values
@@ -329,3 +379,7 @@ grant select on dev_nexus.v_due_email_followups to service_role;
 
 -- Ask PostgREST to refresh its cache so REST sees the new view
 select pg_notify('pgrst', 'reload schema');
+
+INSERT INTO dev_nexus.organizations (id, name, created_at)
+VALUES ('14dfa4be-8508-4fc4-8392-dea0c6d0a041', 'Test Org', NOW())
+ON CONFLICT (id) DO NOTHING;
