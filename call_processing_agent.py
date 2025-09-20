@@ -158,7 +158,16 @@ def process_one(stg):
     sb.table("phone_call_logs_stg").update({"processed":True,"processed_at":datetime.now(timezone.utc),"error_msg":None}).eq("id", stg["id"]).execute()
 
 async def run_call_processing_once():
-    rows = sb.table("phone_call_logs_stg").select("*").eq("processed", False).order("id", asc=True).limit(100).execute().data
+    # explicit
+    # default is ascending
+    rows = (sb.table("phone_call_logs_stg")
+            .select("*")
+            .eq("processed", False)
+            .order("id")
+            .limit(100)
+            .execute()
+            .data)
+
     for r in rows:
         try:
             process_one(r)

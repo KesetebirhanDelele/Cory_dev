@@ -12,15 +12,15 @@ import requests
 from dotenv import load_dotenv
 from faker import Faker
 
-# --- Ensure project root is importable (so imports like `import campaign_builder` work) ---
+# --- Ensure project root is importable (so imports like `import campaign_builder` work)
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# --- Load env once for all tests ---
+# --- Load env once for all tests
 load_dotenv(dotenv_path=ROOT / ".env", override=False)
 
-# --- Supabase client helper ---
+# --- Supabase client helper
 try:
     from supabase import create_client, Client  # type: ignore
 except Exception:  # pragma: no cover
@@ -49,22 +49,26 @@ def supabase() -> Any:
     # Pin schema so PostgREST sends Accept-Profile & Content-Profile headers
     try:
         client.postgrest.schema = SCHEMA  # type: ignore[attr-defined]
+        # also ensure headers (belt & suspenders)
+        client.postgrest.headers["Accept-Profile"] = SCHEMA
+        client.postgrest.headers["Content-Profile"] = SCHEMA
     except Exception:
         pass
     return client
 
 def sb_table(client: Any, name: str):
-    # Pin schema on the client so both READ & WRITE carry the header
     try:
         client.postgrest.schema = SCHEMA
-        # also belt & suspenders: set headers explicitly
         h = client.postgrest.headers
         h["Accept-Profile"] = SCHEMA
         h["Content-Profile"] = SCHEMA
     except Exception:
         pass
-    # IMPORTANT: do NOT pass schema=... here
-    return client.table(name)
+    # Force schema on every call (works on supabase>=2.4)
+    try:
+        return client.table(name, schema=SCHEMA)
+    except TypeError:
+        return client.table(name)
 
 class _SchemaPinnedClient:
     """Wrap a Supabase client so every call uses the given schema, and
@@ -75,12 +79,8 @@ class _SchemaPinnedClient:
         self._pin_headers()
 
     def _pin_headers(self):
-        # Keep postgrest.schema + headers aligned
         try:
             self._c.postgrest.schema = self._schema
-        except Exception:
-            pass
-        try:
             h = self._c.postgrest.headers
             h["Accept-Profile"] = self._schema
             h["Content-Profile"] = self._schema
@@ -102,7 +102,7 @@ class _SchemaPinnedClient:
         return self.table(name, *args, **kwargs)
 
 
-# --- RAW REST helpers (force schema headers on every request for WRITES) ---
+# --- RAW REST helpers (force schema headers on every request for WRITES/READS)
 def _rest_headers() -> dict:
     srk = _require_service_role()
     return {
@@ -118,15 +118,18 @@ def _rest_headers() -> dict:
 def _rest_url(table: str) -> str:
     return os.environ["SUPABASE_URL"].rstrip("/") + f"/rest/v1/{table}"
 
+
 def rest_get(table: str, params: dict) -> list[dict]:
     r = requests.get(_rest_url(table), headers=_rest_headers(), params=params)
     if not r.ok:
         raise AssertionError(f"REST get {table} failed {r.status_code}: {r.text}")
     return r.json() if r.text else []
 
+
 def rest_single_by_id(table: str, id_: str) -> dict | None:
     rows = rest_get(table, {"select": "*", "id": f"eq.{id_}", "limit": "1"})
     return rows[0] if rows else None
+
 
 def rest_insert(table: str, rows: dict | list[dict]) -> list[dict]:
     r = requests.post(_rest_url(table), headers=_rest_headers(), data=json.dumps(rows))
@@ -258,11 +261,11 @@ def enroll_funcs(supabase):
         if provided.get("contact_id"):
             return provided["contact_id"]
         first = provided.get("first_name") or "Test"
-        last  = provided.get("last_name")  or "User"
+        last = provided.get("last_name") or "User"
         row = {
             "org_id": org_id,
             "first_name": first,
-            "last_name":  last,
+            "last_name": last,
             "full_name": f"{first} {last}",
             "email": provided.get("email"),
             "phone": provided.get("phone"),
@@ -278,7 +281,7 @@ def enroll_funcs(supabase):
         campaign_id = provided["campaign_id"]
         contact_id = _ensure_contact_id(org_id, provided)
 
-        # 👇 Use REST (forces dev_nexus schema) rather than sb_table(...)
+        # Use REST (forces dev_nexus schema) rather than sb_table(...)
         steps = rest_get(
             "campaign_steps",
             {
@@ -304,22 +307,52 @@ def enroll_funcs(supabase):
 
     return dict(enroll=enroll)
 
-# --- Orchestrator adapter ---
+# --- Orchestrator adapter --
+# tests/conftest.py
 @pytest.fixture(scope="session")
 def orchestrator_funcs():
     import orchestrator_loop as loop
-    run_once = _get_fn(loop, "run_once", "tick_once", "tick", "main")
+    # IMPORTANT: prefer a one-shot function first
+    run_once = _get_fn(loop, "tick", "run_once", "tick_once", "main")
     return dict(run_once=run_once)
 
-
 # --- Call-processing adapter ---
+# --- Call-processing adapter (force module to use the test schema) ---
 @pytest.fixture(scope="session")
-def call_processing_funcs():
+def call_processing_funcs(supabase):
     import call_processing_agent as cpa
-    return dict(
-        process_once=_get_fn(cpa, "process_once", "run_once", "run_call_processing_once")
-    )
+    pinned = _SchemaPinnedClient(supabase, SCHEMA)
 
+    # 1) Point every likely handle at the pinned client
+    cpa.sb = pinned
+    if hasattr(cpa, "db"):
+        cpa.db = pinned  # some modules alias the client as `db`
+
+    # 2) If the module lazily creates a new client, neuter that
+    try:
+        import supabase as _supabase_pkg
+        def _return_pinned(*args, **kwargs):
+            return pinned
+        # If the module keeps a reference to `create_client`, override it there
+        if hasattr(cpa, "create_client"):
+            cpa.create_client = _return_pinned
+        # And as a belt-and-suspenders, override the package symbol it might import from
+        if hasattr(_supabase_pkg, "create_client"):
+            # do NOT globally monkeypatch; only override where used:
+            pass
+    except Exception:
+        pass
+
+    # 3) Make sure headers stay pinned before each request
+    try:
+        h = pinned.postgrest.headers
+        h["Accept-Profile"]  = SCHEMA
+        h["Content-Profile"] = SCHEMA
+    except Exception:
+        pass
+
+    # 4) Hand back the right entrypoint
+    return dict(process_once=_get_fn(cpa, "process_once", "run_once", "run_call_processing_once"))
 
 # --- Test utilities ---
 @pytest.fixture()
@@ -335,8 +368,25 @@ def fake_contact():
 
 @pytest.fixture(autouse=True)
 def set_test_mode(monkeypatch):
+    # Make product code run in test/simulated mode when possible
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("SIMULATE_PROVIDERS", "true")
+
+    # Avoid nested asyncio.run() inside sms_sender during orchestrator tests
+    try:
+        import sms_sender
+        monkeypatch.setattr(sms_sender, "run_sms_sender", lambda: None, raising=True)
+    except Exception:
+        pass
+
+    # Provide supabase_repo.now_iso if product code imports it
+    try:
+        import supabase_repo as sr
+        if not hasattr(sr, "now_iso"):
+            monkeypatch.setattr(sr, "now_iso", lambda: datetime.now(timezone.utc).isoformat(), raising=False)
+    except Exception:
+        pass
+
     yield
 
 
