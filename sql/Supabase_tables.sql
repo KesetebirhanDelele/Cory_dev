@@ -383,3 +383,7 @@ select pg_notify('pgrst', 'reload schema');
 INSERT INTO dev_nexus.organizations (id, name, created_at)
 VALUES ('14dfa4be-8508-4fc4-8392-dea0c6d0a041', 'Test Org', NOW())
 ON CONFLICT (id) DO NOTHING;
+
+--8) Create public view for easier access from external tools
+CREATE VIEW public.phone_call_logs_stg AS
+SELECT * FROM dev_nexus.phone_call_logs_stg;
