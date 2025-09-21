@@ -71,8 +71,9 @@ def sb_table(client: Any, name: str):
         return client.table(name)
 
 class _SchemaPinnedClient:
-    """Wrap a Supabase client so every call uses the given schema, and
-    force PostgREST headers so reads/writes never fall back to 'public'."""
+    """Wrap a Supabase client so every call uses the given schema,
+    forcing PostgREST headers to avoid falling back to 'public'."""
+
     def __init__(self, client, schema: str):
         self._c = client
         self._schema = schema
@@ -80,6 +81,7 @@ class _SchemaPinnedClient:
 
     def _pin_headers(self):
         try:
+            # Set schema context for PostgREST
             self._c.postgrest.schema = self._schema
             h = self._c.postgrest.headers
             h["Accept-Profile"] = self._schema
@@ -90,11 +92,13 @@ class _SchemaPinnedClient:
     def __getattr__(self, name):
         return getattr(self._c, name)
 
-    def table(self, name, *args, **kwargs):
+    def table(self, name: str, *args, **kwargs):
+        """Always use schema override instead of prefixing table names."""
         self._pin_headers()
         try:
             return self._c.table(name, schema=self._schema)  # supabase>=2.4
         except TypeError:
+            # fallback if schema kw not supported
             return self._c.table(name)
 
     # alias used by older code
@@ -251,7 +255,6 @@ def builder_funcs(supabase):
 
     return dict(create_campaign=create_campaign, add_step=add_step)
 
-
 # --- Enrollment adapter (schema-safe; doesn’t rely on product code using `public`) ---
 @pytest.fixture(scope="session")
 def enroll_funcs(supabase):
@@ -281,25 +284,29 @@ def enroll_funcs(supabase):
         campaign_id = provided["campaign_id"]
         contact_id = _ensure_contact_id(org_id, provided)
 
-        # Use REST (forces dev_nexus schema) rather than sb_table(...)
+        # Get the first step for the campaign
         steps = rest_get(
             "campaign_steps",
             {
                 "select": "id,channel,order_id",
                 "campaign_id": f"eq.{campaign_id}",
-                "order": "order_id.asc",
-                "limit": "1",
-            },
+            } | {"order": "order_id.asc", "limit": 1}
         )
+        first_step_id = steps[0]["id"] if steps else None
         next_channel = steps[0]["channel"] if steps else "voice"
+
+        now = datetime.now(timezone.utc)
 
         row = {
             "org_id": org_id,
             "contact_id": contact_id,
             "campaign_id": campaign_id,
             "status": "active",
+            "current_step_id": first_step_id,   # ✅ ensures enrollment starts at step 1
             "next_channel": next_channel,
-            "next_run_at": datetime.now(timezone.utc).isoformat(),
+            "next_run_at": now.isoformat(),
+            "started_at": now.isoformat(),
+            "updated_at": now.isoformat(),
         }
         created = rest_insert("campaign_enrollments", row)
         assert created and created[0].get("id"), "Failed to create enrollment"
@@ -307,7 +314,7 @@ def enroll_funcs(supabase):
 
     return dict(enroll=enroll)
 
-# --- Orchestrator adapter --
+# --- Orchestrator adapter ---
 # tests/conftest.py
 @pytest.fixture(scope="session")
 def orchestrator_funcs():
