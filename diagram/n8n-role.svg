@@ -1,0 +1,235 @@
+<?xml version="1.0" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1136pt" height="747pt" viewBox="0.00 0.00 1136.18 746.80">
+<g id="graph0" class="graph" transform="translate(-35.692108154296875,754.7076110839844) scale(1)" data-name="N8NRole">
+
+<polygon fill="white" stroke="none" points="-4,4 -4,-742.8 1132.18,-742.8 1132.18,4 -4,4"/>
+<g id="clust1" class="cluster" data-name="cluster_brain">
+
+<polygon fill="none" stroke="#bdbdbd" points="8,-455.8 8,-538.8 766.08,-538.8 766.08,-455.8 8,-455.8"/>
+<text text-anchor="middle" x="387.04" y="-522.2" font-family="Inter,Arial" font-size="14.00">LangGraph (brain)</text>
+</g>
+<g id="clust2" class="cluster" data-name="cluster_db">
+
+<polygon fill="none" stroke="#cfcfcf" points="952.49,-332.8 952.49,-517.8 1120.18,-517.8 1120.18,-332.8 952.49,-332.8"/>
+<text text-anchor="middle" x="1036.33" y="-501.2" font-family="Inter,Arial" font-size="14.00">Supabase (source of truth)</text>
+</g>
+<g id="clust3" class="cluster" data-name="cluster_n8n">
+
+<path fill="none" stroke="#80cbc4" d="M566.46,-51.8C566.46,-51.8 747.13,-51.8 747.13,-51.8 753.13,-51.8 759.13,-57.8 759.13,-63.8 759.13,-63.8 759.13,-435.8 759.13,-435.8 759.13,-441.8 753.13,-447.8 747.13,-447.8 747.13,-447.8 566.46,-447.8 566.46,-447.8 560.46,-447.8 554.46,-441.8 554.46,-435.8 554.46,-435.8 554.46,-63.8 554.46,-63.8 554.46,-57.8 560.46,-51.8 566.46,-51.8"/>
+<text text-anchor="middle" x="656.79" y="-431.2" font-family="Inter,Arial" font-size="14.00">n8n workflows (integration layer)</text>
+</g>
+<g id="clust4" class="cluster" data-name="cluster_prov_sms">
+
+<polygon fill="none" stroke="#cfcfcf" points="989.11,-241.8 989.11,-318.8 1084.55,-318.8 1084.55,-241.8 989.11,-241.8"/>
+<text text-anchor="middle" x="1036.83" y="-302.2" font-family="Inter,Arial" font-size="14.00">SMS Provider</text>
+</g>
+<g id="clust5" class="cluster" data-name="cluster_prov_email">
+
+<polygon fill="none" stroke="#cfcfcf" points="985.84,-151.8 985.84,-228.8 1086.83,-228.8 1086.83,-151.8 985.84,-151.8"/>
+<text text-anchor="middle" x="1036.33" y="-212.2" font-family="Inter,Arial" font-size="14.00">Email Provider</text>
+</g>
+<!-- ORCH -->
+<g id="node1" class="node" pointer-events="visible" data-name="ORCH">
+
+<path fill="#fffde7" stroke="#000000" d="M332.93,-505.4C332.93,-505.4 28.02,-505.4 28.02,-505.4 22.02,-505.4 16.02,-499.4 16.02,-493.4 16.02,-493.4 16.02,-476.2 16.02,-476.2 16.02,-470.2 22.02,-464.2 28.02,-464.2 28.02,-464.2 332.93,-464.2 332.93,-464.2 338.93,-464.2 344.93,-470.2 344.93,-476.2 344.93,-476.2 344.93,-493.4 344.93,-493.4 344.93,-499.4 338.93,-505.4 332.93,-505.4"/>
+<text text-anchor="middle" x="180.48" y="-489" font-family="Inter,Arial" font-size="14.00">orchestrate_communication</text>
+<text text-anchor="middle" x="180.48" y="-472.2" font-family="Inter,Arial" font-size="14.00">(decides send_voice / send_sms / send_email / escalate)</text>
+</g>
+<!-- PROG -->
+<g id="node2" class="node" pointer-events="visible" data-name="PROG">
+
+<path fill="#fffde7" stroke="#000000" d="M745.87,-505.4C745.87,-505.4 567.71,-505.4 567.71,-505.4 561.71,-505.4 555.71,-499.4 555.71,-493.4 555.71,-493.4 555.71,-476.2 555.71,-476.2 555.71,-470.2 561.71,-464.2 567.71,-464.2 567.71,-464.2 745.87,-464.2 745.87,-464.2 751.87,-464.2 757.87,-470.2 757.87,-476.2 757.87,-476.2 757.87,-493.4 757.87,-493.4 757.87,-499.4 751.87,-505.4 745.87,-505.4"/>
+<text text-anchor="middle" x="656.79" y="-489" font-family="Inter,Arial" font-size="14.00">progress_campaign</text>
+<text text-anchor="middle" x="656.79" y="-472.2" font-family="Inter,Arial" font-size="14.00">(advance / backoff / next_run_at)</text>
+</g>
+<!-- ORCH&#45;&gt;PROG -->
+<!-- SMSWF -->
+<g id="node6" class="node" pointer-events="visible" data-name="SMSWF">
+
+<path fill="#e0f2f1" stroke="#000000" d="M709.17,-321.8C709.17,-321.8 604.41,-321.8 604.41,-321.8 598.41,-321.8 592.41,-315.8 592.41,-309.8 592.41,-309.8 592.41,-241.8 592.41,-241.8 592.41,-235.8 598.41,-229.8 604.41,-229.8 604.41,-229.8 709.17,-229.8 709.17,-229.8 715.17,-229.8 721.17,-235.8 721.17,-241.8 721.17,-241.8 721.17,-309.8 721.17,-309.8 721.17,-315.8 715.17,-321.8 709.17,-321.8"/>
+<text text-anchor="middle" x="656.79" y="-305.2" font-family="Inter,Arial" font-size="14.00">send_sms workflow</text>
+<text text-anchor="middle" x="656.79" y="-288.4" font-family="Inter,Arial" font-size="14.00">• auth</text>
+<text text-anchor="middle" x="656.79" y="-271.6" font-family="Inter,Arial" font-size="14.00">• payload mapping</text>
+<text text-anchor="middle" x="656.79" y="-254.8" font-family="Inter,Arial" font-size="14.00">• retry/jitter</text>
+<text text-anchor="middle" x="656.79" y="-238" font-family="Inter,Arial" font-size="14.00">• idempotency key</text>
+</g>
+<!-- ORCH&#45;&gt;SMSWF -->
+<g id="edge2" class="edge" data-name="ORCH-&gt;SMSWF">
+
+<path fill="none" stroke="#000000" d="M229.13,-463.8C311.97,-427.3 483.11,-351.89 581.61,-308.49"/>
+<polygon fill="#000000" stroke="#000000" points="582.95,-311.72 590.69,-304.49 580.13,-305.32 582.95,-311.72"/>
+<text text-anchor="middle" x="442.45" y="-403" font-family="Inter,Arial" font-size="14.00">send_sms</text>
+</g>
+<!-- EMAILWF -->
+<g id="node7" class="node" pointer-events="visible" data-name="EMAILWF">
+
+<path fill="#e0f2f1" stroke="#000000" d="M713.49,-211.8C713.49,-211.8 600.1,-211.8 600.1,-211.8 594.1,-211.8 588.1,-205.8 588.1,-199.8 588.1,-199.8 588.1,-131.8 588.1,-131.8 588.1,-125.8 594.1,-119.8 600.1,-119.8 600.1,-119.8 713.49,-119.8 713.49,-119.8 719.49,-119.8 725.49,-125.8 725.49,-131.8 725.49,-131.8 725.49,-199.8 725.49,-199.8 725.49,-205.8 719.49,-211.8 713.49,-211.8"/>
+<text text-anchor="middle" x="656.79" y="-195.2" font-family="Inter,Arial" font-size="14.00">send_email workflow</text>
+<text text-anchor="middle" x="656.79" y="-178.4" font-family="Inter,Arial" font-size="14.00">• auth</text>
+<text text-anchor="middle" x="656.79" y="-161.6" font-family="Inter,Arial" font-size="14.00">• template merge</text>
+<text text-anchor="middle" x="656.79" y="-144.8" font-family="Inter,Arial" font-size="14.00">• retry/jitter</text>
+<text text-anchor="middle" x="656.79" y="-128" font-family="Inter,Arial" font-size="14.00">• idempotency key</text>
+</g>
+<!-- ORCH&#45;&gt;EMAILWF -->
+<g id="edge3" class="edge" data-name="ORCH-&gt;EMAILWF">
+
+<path fill="none" stroke="#000000" d="M200.68,-463.74C232.28,-429.86 298.23,-362.34 362.96,-316 435.58,-264 460.24,-261.12 539.94,-220.8 552.09,-214.65 565.04,-208.31 577.73,-202.2"/>
+<polygon fill="#000000" stroke="#000000" points="578.95,-205.5 586.46,-198.02 575.92,-199.18 578.95,-205.5"/>
+<text text-anchor="middle" x="442.45" y="-320" font-family="Inter,Arial" font-size="14.00">send_email</text>
+</g>
+<!-- ESC -->
+<g id="node12" class="node" pointer-events="visible" data-name="ESC">
+
+<path fill="#ffebee" stroke="#000000" d="M697.04,-41.4C697.04,-41.4 616.54,-41.4 616.54,-41.4 610.54,-41.4 604.54,-35.4 604.54,-29.4 604.54,-29.4 604.54,-12.2 604.54,-12.2 604.54,-6.2 610.54,-0.2 616.54,-0.2 616.54,-0.2 697.04,-0.2 697.04,-0.2 703.04,-0.2 709.04,-6.2 709.04,-12.2 709.04,-12.2 709.04,-29.4 709.04,-29.4 709.04,-35.4 703.04,-41.4 697.04,-41.4"/>
+<text text-anchor="middle" x="656.79" y="-25" font-family="Inter,Arial" font-size="14.00">Human handoff</text>
+<text text-anchor="middle" x="656.79" y="-8.2" font-family="Inter,Arial" font-size="14.00">(Slack/Ticket)</text>
+</g>
+<!-- ORCH&#45;&gt;ESC -->
+<g id="edge4" class="edge" data-name="ORCH-&gt;ESC">
+
+<path fill="none" stroke="#000000" d="M184.49,-464.14C195.23,-398.19 237.96,-191.09 362.96,-89 428.46,-35.5 528.35,-22.4 592.86,-20"/>
+<polygon fill="#000000" stroke="#000000" points="592.67,-23.5 602.57,-19.71 592.47,-16.51 592.67,-23.5"/>
+<text text-anchor="middle" x="442.45" y="-93" font-family="Inter,Arial" font-size="14.00">escalate (direct, not via n8n)</text>
+</g>
+<!-- INT -->
+<g id="node3" class="node" pointer-events="visible" data-name="INT">
+
+<path fill="#f7f7f9" stroke="#000000" d="M1084.14,-430.8C1084.14,-430.8 988.53,-430.8 988.53,-430.8 982.53,-430.8 976.53,-424.8 976.53,-418.8 976.53,-418.8 976.53,-406.8 976.53,-406.8 976.53,-400.8 982.53,-394.8 988.53,-394.8 988.53,-394.8 1084.14,-394.8 1084.14,-394.8 1090.14,-394.8 1096.14,-400.8 1096.14,-406.8 1096.14,-406.8 1096.14,-418.8 1096.14,-418.8 1096.14,-424.8 1090.14,-430.8 1084.14,-430.8"/>
+<text text-anchor="middle" x="1036.33" y="-408.6" font-family="Inter,Arial" font-size="14.00">public.interactions</text>
+</g>
+<!-- INT&#45;&gt;PROG -->
+<g id="edge12" class="edge" data-name="INT-&gt;PROG">
+
+<path fill="none" stroke="#000000" d="M976.22,-423.88C967.37,-427.71 959.03,-432.87 952.49,-439.8 940.5,-452.5 956.18,-466.97 942.49,-477.8 887.72,-521.1 806.75,-518.76 745.15,-507.96"/>
+<polygon fill="#000000" stroke="#000000" points="745.84,-504.53 735.37,-506.13 744.55,-511.41 745.84,-504.53"/>
+<text text-anchor="middle" x="867.06" y="-534.8" font-family="Inter,Arial" font-size="14.00">map outcome</text>
+<text text-anchor="middle" x="867.06" y="-518" font-family="Inter,Arial" font-size="14.00">success/failed</text>
+</g>
+<!-- EVT_S -->
+<g id="node4" class="node" pointer-events="visible" data-name="EVT_S">
+
+<path fill="#f7f7f9" stroke="#000000" d="M1095.72,-376.8C1095.72,-376.8 976.95,-376.8 976.95,-376.8 970.95,-376.8 964.95,-370.8 964.95,-364.8 964.95,-364.8 964.95,-352.8 964.95,-352.8 964.95,-346.8 970.95,-340.8 976.95,-340.8 976.95,-340.8 1095.72,-340.8 1095.72,-340.8 1101.72,-340.8 1107.72,-346.8 1107.72,-352.8 1107.72,-352.8 1107.72,-364.8 1107.72,-364.8 1107.72,-370.8 1101.72,-376.8 1095.72,-376.8"/>
+<text text-anchor="middle" x="1036.33" y="-354.6" font-family="Inter,Arial" font-size="14.00">public.stg_sms_events</text>
+</g>
+<!-- EVT_E -->
+<g id="node5" class="node" pointer-events="visible" data-name="EVT_E">
+
+<path fill="#f7f7f9" stroke="#000000" d="M1100.03,-484.8C1100.03,-484.8 972.64,-484.8 972.64,-484.8 966.64,-484.8 960.64,-478.8 960.64,-472.8 960.64,-472.8 960.64,-460.8 960.64,-460.8 960.64,-454.8 966.64,-448.8 972.64,-448.8 972.64,-448.8 1100.03,-448.8 1100.03,-448.8 1106.03,-448.8 1112.03,-454.8 1112.03,-460.8 1112.03,-460.8 1112.03,-472.8 1112.03,-472.8 1112.03,-478.8 1106.03,-484.8 1100.03,-484.8"/>
+<text text-anchor="middle" x="1036.33" y="-462.6" font-family="Inter,Arial" font-size="14.00">public.stg_email_events</text>
+</g>
+<!-- ST -->
+<g id="node10" class="node" pointer-events="visible" data-name="ST">
+
+<path fill="#f3e5f5" stroke="#000000" d="M1059.77,-285.8C1059.77,-285.8 1012.9,-285.8 1012.9,-285.8 1006.9,-285.8 1000.9,-279.8 1000.9,-273.8 1000.9,-273.8 1000.9,-261.8 1000.9,-261.8 1000.9,-255.8 1006.9,-249.8 1012.9,-249.8 1012.9,-249.8 1059.77,-249.8 1059.77,-249.8 1065.77,-249.8 1071.77,-255.8 1071.77,-261.8 1071.77,-261.8 1071.77,-273.8 1071.77,-273.8 1071.77,-279.8 1065.77,-285.8 1059.77,-285.8"/>
+<text text-anchor="middle" x="1036.33" y="-263.6" font-family="Inter,Arial" font-size="14.00">SlickText</text>
+</g>
+<!-- SMSWF&#45;&gt;ST -->
+<g id="edge5" class="edge" data-name="SMSWF-&gt;ST">
+
+<path fill="none" stroke="#000000" d="M721.59,-257.44C743.59,-251.97 768.51,-246.71 791.64,-244 858.23,-236.2 875.97,-235.61 942.49,-244 958.01,-245.96 974.66,-249.69 989.51,-253.63"/>
+<polygon fill="#000000" stroke="#000000" points="988.43,-256.96 999,-256.25 990.3,-250.21 988.43,-256.96"/>
+<text text-anchor="middle" x="867.06" y="-248" font-family="Inter,Arial" font-size="14.00">POST /messages</text>
+</g>
+<!-- MD -->
+<g id="node11" class="node" pointer-events="visible" data-name="MD">
+
+<path fill="#f3e5f5" stroke="#000000" d="M1056.83,-195.8C1056.83,-195.8 1015.84,-195.8 1015.84,-195.8 1009.84,-195.8 1003.84,-189.8 1003.84,-183.8 1003.84,-183.8 1003.84,-171.8 1003.84,-171.8 1003.84,-165.8 1009.84,-159.8 1015.84,-159.8 1015.84,-159.8 1056.83,-159.8 1056.83,-159.8 1062.83,-159.8 1068.83,-165.8 1068.83,-171.8 1068.83,-171.8 1068.83,-183.8 1068.83,-183.8 1068.83,-189.8 1062.83,-195.8 1056.83,-195.8"/>
+<text text-anchor="middle" x="1036.33" y="-173.6" font-family="Inter,Arial" font-size="14.00">Mandrill</text>
+</g>
+<!-- EMAILWF&#45;&gt;MD -->
+<g id="edge6" class="edge" data-name="EMAILWF-&gt;MD">
+
+<path fill="none" stroke="#000000" d="M725.72,-167.96C803.07,-170.42 927.11,-174.36 992.22,-176.43"/>
+<polygon fill="#000000" stroke="#000000" points="992.05,-179.93 1002.16,-176.75 992.28,-172.93 992.05,-179.93"/>
+<text text-anchor="middle" x="867.06" y="-178" font-family="Inter,Arial" font-size="14.00">POST /messages</text>
+</g>
+<!-- N8NWH -->
+<g id="node8" class="node" pointer-events="visible" data-name="N8NWH">
+
+<polygon fill="#e0f2f1" stroke="#000000" points="728.96,-415.5 725.96,-419.5 704.96,-419.5 701.96,-415.5 584.62,-415.5 584.62,-340.1 728.96,-340.1 728.96,-415.5"/>
+<text text-anchor="middle" x="656.79" y="-398.8" font-family="Inter,Arial" font-size="14.00">/webhooks/campaign</text>
+<text text-anchor="middle" x="656.79" y="-382" font-family="Inter,Arial" font-size="14.00">• verify signature</text>
+<text text-anchor="middle" x="656.79" y="-365.2" font-family="Inter,Arial" font-size="14.00">• dedupe/replay guard</text>
+<text text-anchor="middle" x="656.79" y="-348.4" font-family="Inter,Arial" font-size="14.00">• normalize → staging</text>
+</g>
+<!-- N8NWH&#45;&gt;INT -->
+<g id="edge11" class="edge" data-name="N8NWH-&gt;INT">
+
+<path fill="none" stroke="#000000" d="M729.25,-384.42C796.85,-390.69 897.69,-400.04 964.94,-406.27"/>
+<polygon fill="#000000" stroke="#000000" points="964.47,-409.75 974.75,-407.18 965.12,-402.78 964.47,-409.75"/>
+<text text-anchor="middle" x="867.06" y="-423.8" font-family="Inter,Arial" font-size="14.00">upsert interactions</text>
+<text text-anchor="middle" x="867.06" y="-407" font-family="Inter,Arial" font-size="14.00">(provider_ref, status)</text>
+</g>
+<!-- N8NWH&#45;&gt;EVT_S -->
+<g id="edge9" class="edge" data-name="N8NWH-&gt;EVT_S">
+
+<path fill="none" stroke="#000000" d="M729.25,-369.35C749.4,-367.26 771.36,-365.26 791.64,-364 845.39,-360.66 905.92,-359.36 953.21,-358.89"/>
+<polygon fill="#000000" stroke="#000000" points="953.14,-362.39 963.11,-358.8 953.08,-355.39 953.14,-362.39"/>
+<text text-anchor="middle" x="867.06" y="-368" font-family="Inter,Arial" font-size="14.00">insert staging (sms)</text>
+</g>
+<!-- N8NWH&#45;&gt;EVT_E -->
+<g id="edge10" class="edge" data-name="N8NWH-&gt;EVT_E">
+
+<path fill="none" stroke="#000000" d="M729.25,-414.62C749.02,-423.47 770.78,-432.03 791.64,-437.8 799.37,-439.94 882.36,-449.6 949.37,-457.19"/>
+<polygon fill="#000000" stroke="#000000" points="948.57,-460.62 958.9,-458.27 949.35,-453.67 948.57,-460.62"/>
+<text text-anchor="middle" x="867.06" y="-460" font-family="Inter,Arial" font-size="14.00">insert staging (email)</text>
+</g>
+<!-- CRON -->
+<g id="node9" class="node" pointer-events="visible" data-name="CRON">
+
+<path fill="#e0f2f1" stroke="#000000" d="M696,-101.4C696,-101.4 617.58,-101.4 617.58,-101.4 611.58,-101.4 605.58,-95.4 605.58,-89.4 605.58,-89.4 605.58,-72.2 605.58,-72.2 605.58,-66.2 611.58,-60.2 617.58,-60.2 617.58,-60.2 696,-60.2 696,-60.2 702,-60.2 708,-66.2 708,-72.2 708,-72.2 708,-89.4 708,-89.4 708,-95.4 702,-101.4 696,-101.4"/>
+<text text-anchor="middle" x="656.79" y="-85" font-family="Inter,Arial" font-size="14.00">Cron (optional)</text>
+<text text-anchor="middle" x="656.79" y="-68.2" font-family="Inter,Arial" font-size="14.00">periodic jobs</text>
+</g>
+<!-- CRON&#45;&gt;ORCH -->
+<g id="edge13" class="edge" data-name="CRON-&gt;ORCH">
+
+<path fill="none" stroke="#000000" stroke-dasharray="5,2" d="M605.1,-88.8C541.8,-101.1 433.29,-130.09 362.96,-192.2 276.87,-268.21 217.79,-394.93 193.66,-453.43"/>
+<polygon fill="#000000" stroke="#000000" points="190.51,-451.88 190,-462.46 197,-454.51 190.51,-451.88"/>
+<text text-anchor="middle" x="442.45" y="-212.8" font-family="Inter,Arial" font-size="14.00">periodic triggers</text>
+<text text-anchor="middle" x="442.45" y="-196" font-family="Inter,Arial" font-size="14.00">(ex: reconciler)</text>
+</g>
+<!-- ST&#45;&gt;N8NWH -->
+<g id="edge7" class="edge" data-name="ST-&gt;N8NWH">
+
+<path fill="none" stroke="#000000" d="M1000.77,-281.01C983.42,-287.4 961.98,-294.95 942.49,-300.8 876.35,-320.65 858.28,-319.89 791.64,-338 774.95,-342.54 757.16,-347.64 740.18,-352.64"/>
+<polygon fill="#000000" stroke="#000000" points="739.21,-349.27 730.61,-355.47 741.2,-355.99 739.21,-349.27"/>
+<text text-anchor="middle" x="867.06" y="-342" font-family="Inter,Arial" font-size="14.00">delivery / fail</text>
+</g>
+<!-- MD&#45;&gt;N8NWH -->
+<g id="edge8" class="edge" data-name="MD-&gt;N8NWH">
+
+<path fill="none" stroke="#000000" d="M1003.38,-195.26C986.47,-205.79 966.39,-220.5 952.49,-237.8 945.5,-246.49 951.4,-254.11 942.49,-260.8 888.43,-301.36 844.26,-237.59 791.64,-280 772.99,-295.03 790.2,-313.49 773.64,-330.8 764.12,-340.77 752.18,-348.68 739.63,-354.95"/>
+<polygon fill="#000000" stroke="#000000" points="738.45,-351.63 730.83,-358.99 741.38,-357.99 738.45,-351.63"/>
+<text text-anchor="middle" x="867.06" y="-284" font-family="Inter,Arial" font-size="14.00">delivered / bounced / spam</text>
+</g>
+<!-- NOTE -->
+<g id="node13" class="node" pointer-events="visible" data-name="NOTE">
+
+<polygon fill="#fffde7" stroke="#000000" points="767.5,-738.8 540.09,-738.8 540.09,-546.8 773.5,-546.8 773.5,-732.8 767.5,-738.8"/>
+<polyline fill="none" stroke="#000000" points="767.5,-738.8 767.5,-732.8"/>
+<polyline fill="none" stroke="#000000" points="773.5,-732.8 767.5,-732.8"/>
+<text text-anchor="middle" x="656.79" y="-722.2" font-family="Inter,Arial" font-size="14.00">n8n responsibilities:</text>
+<text text-anchor="middle" x="656.79" y="-705.4" font-family="Inter,Arial" font-size="14.00">• credentials &amp; auth</text>
+<text text-anchor="middle" x="656.79" y="-688.6" font-family="Inter,Arial" font-size="14.00">• API retries/backoff</text>
+<text text-anchor="middle" x="656.79" y="-671.8" font-family="Inter,Arial" font-size="14.00">• payload mapping/validation</text>
+<text text-anchor="middle" x="656.79" y="-655" font-family="Inter,Arial" font-size="14.00">• webhook verification &amp; dedupe</text>
+<text text-anchor="middle" x="656.79" y="-638.2" font-family="Inter,Arial" font-size="14.00">• normalization into DB</text>
+<text text-anchor="middle" x="656.79" y="-605.4" font-family="Inter,Arial" font-size="14.00">Not n8n:</text>
+<text text-anchor="middle" x="656.79" y="-588.6" font-family="Inter,Arial" font-size="14.00">• campaign policy</text>
+<text text-anchor="middle" x="656.79" y="-571.8" font-family="Inter,Arial" font-size="14.00">• step selection</text>
+<text text-anchor="middle" x="656.79" y="-555" font-family="Inter,Arial" font-size="14.00">• escalation rules (that’s LangGraph)</text>
+</g>
+<!-- cluster_n8n -->
+<g id="node14" class="node" pointer-events="visible" data-name="cluster_n8n">
+
+<path fill="#f7f7f9" stroke="#000000" d="M209.3,-660.8C209.3,-660.8 151.66,-660.8 151.66,-660.8 145.66,-660.8 139.66,-654.8 139.66,-648.8 139.66,-648.8 139.66,-636.8 139.66,-636.8 139.66,-630.8 145.66,-624.8 151.66,-624.8 151.66,-624.8 209.3,-624.8 209.3,-624.8 215.3,-624.8 221.3,-630.8 221.3,-636.8 221.3,-636.8 221.3,-648.8 221.3,-648.8 221.3,-654.8 215.3,-660.8 209.3,-660.8" style=""/>
+<text text-anchor="middle" x="180.48" y="-638.6" font-family="Inter,Arial" font-size="14.00" style="">cluster_n8n</text>
+</g>
+<!-- cluster_n8n&#45;&gt;NOTE -->
+<g id="edge14" class="edge" data-name="cluster_n8n-&gt;NOTE">
+
+<path fill="none" stroke="#000000" stroke-dasharray="1,5" d="M221.51,-642.8C290.97,-642.8 436.28,-642.8 539.67,-642.8"/>
+</g>
+</g>
+</svg>

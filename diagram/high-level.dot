@@ -1,0 +1,30 @@
+digraph G {
+  rankdir=TB;
+  node [shape=box, style="rounded,filled", fillcolor="#f7f7f9", color="#999", fontname="Inter,Arial"];
+  edge [color="#666", fontname="Inter,Arial"];
+
+  B  [label="Campaign Builder"];
+  E  [label="Enrollment Agent"];
+  CE [label="Enrollments", shape=ellipse];
+  S  [label="Scheduler / cron"];
+  G  [label="LangGraph Orchestrator"];
+  D  [label="Decide next_action\n(channel • intent • policy)"];
+  A  [label="Execute action\n(voice • sms • email)"];
+  H  [label="Provider webhooks", shape=folder];
+  U  [label="Update interactions\n(outcome)"];
+  P  [label="Progress campaign\nadvance or reschedule"];
+  ESC[label="Human handoff (optional)"];
+
+  B -> E -> CE;
+
+  S -> G -> D;
+  CE -> G [style=dashed, label="read state"];
+
+  D -> A [label="send_*"];
+  D -> ESC [label="escalate"];
+
+  A -> H -> U -> P;
+  P -> G [label="success / retry"];
+  P -> S [label="write next_run_at"];
+  P -> CE;
+}

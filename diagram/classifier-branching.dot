@@ -1,0 +1,60 @@
+digraph ClassifierBranching {
+  rankdir=TB;
+  fontname="Inter,Arial";
+  node [shape=box, style="rounded,filled", fillcolor="#f7f7f9", color="#999", fontname="Inter,Arial"];
+  edge [color="#666", fontname="Inter,Arial"];
+
+  /* -------- Inputs -------- */
+  subgraph cluster_inputs {
+    label="Inputs";
+    color="#cfcfcf";
+    E  [label="Enrollment state\nlead_id • step_index • attempts • last_result"];
+    S  [label="Step config\nallowed_channels • fallback_channel • prompt"];
+    P  [label="Policy\nmax_attempts • confidence_min • quiet_hours"];
+    X  [label="External flags\nCRM: do_not_call • timezone_ok • vip"];
+  }
+
+  /* -------- Classifier Node (logic) -------- */
+  subgraph cluster_classifier {
+    label="Classifier Node";
+    color="#cfcfcf";
+    G1 [shape=diamond, label="attempts >= max_attempts\nOR do_not_call?"];
+    G2 [shape=diamond, label="timezone_ok? (quiet hours)"];
+    Q  [label="LLM classify\n→ intent, confidence,\n   suggested_channel"];
+    G3 [shape=diamond, label="confidence >= confidence_min\nAND suggested_channel ∈ allowed?"];
+    OUT[label="Set next_action + channel"];
+  }
+
+  /* -------- Outcomes -------- */
+  SV [label="send_voice"];
+  SS [label="send_sms"];
+  SE [label="send_email"];
+  ESC[label="escalate_to_human"];
+  NOP[label="noop (recheck later)"];
+
+  /* Wiring */
+  E -> G1;
+  S -> G1;
+  P -> G1;
+  X -> G1;
+
+  G1 -> OUT [label="yes (guardrail)"];
+  G1 -> G2  [label="no"];
+
+  G2 -> OUT [label="no → noop / delay"];
+  G2 -> Q   [label="yes"];
+
+  Q  -> G3;
+  S  -> G3 [style=dashed, label="allowed_channels"];
+  P  -> G3 [style=dashed, label="confidence_min"];
+
+  G3 -> OUT [label="yes"];
+  G3 -> OUT [label="no → fallback_channel / escalate"];
+
+  /* OUT fan-out */
+  OUT -> SV [label="next_action=send_voice"];
+  OUT -> SS [label="next_action=send_sms"];
+  OUT -> SE [label="next_action=send_email"];
+  OUT -> ESC[label="next_action=escalate"];
+  OUT -> NOP[label="next_action=noop"];
+}

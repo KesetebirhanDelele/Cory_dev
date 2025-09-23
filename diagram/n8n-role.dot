@@ -1,0 +1,80 @@
+digraph N8NRole {
+  rankdir=LR;
+  fontname="Inter,Arial";
+  node [shape=box, style="rounded,filled", fillcolor="#f7f7f9", color="#999", fontname="Inter,Arial"];
+  edge [color="#666", fontname="Inter,Arial"];
+
+  /* ===== Brain & DB (context) ===== */
+  subgraph cluster_brain {
+    label="LangGraph (brain)";
+    color="#bdbdbd";
+    ORCH[label="orchestrate_communication\n(decides send_voice / send_sms / send_email / escalate)", fillcolor="#FFFDE7"];
+    PROG[label="progress_campaign\n(advance / backoff / next_run_at)", fillcolor="#FFFDE7"];
+    ORCH -> PROG [style=invis]; /* keeps layout tidy */
+  }
+
+  subgraph cluster_db {
+    label="Supabase (source of truth)";
+    color="#cfcfcf";
+    INT[label="public.interactions"];
+    EVT_S[label="public.stg_sms_events"];
+    EVT_E[label="public.stg_email_events"];
+  }
+
+  /* ===== n8n (integration runner) ===== */
+  subgraph cluster_n8n {
+    label="n8n workflows (integration layer)";
+    color="#80cbc4";
+    style="rounded";
+    SMSWF[label="send_sms workflow\n• auth\n• payload mapping\n• retry/jitter\n• idempotency key", fillcolor="#E0F2F1"];
+    EMAILWF[label="send_email workflow\n• auth\n• template merge\n• retry/jitter\n• idempotency key", fillcolor="#E0F2F1"];
+    N8NWH[label="/webhooks/campaign\n• verify signature\n• dedupe/replay guard\n• normalize → staging", shape=folder, fillcolor="#E0F2F1"];
+    CRON[label="Cron (optional)\nperiodic jobs", fillcolor="#E0F2F1"];
+  }
+
+  /* ===== Providers ===== */
+  subgraph cluster_prov_sms {
+    label="SMS Provider";
+    color="#cfcfcf";
+    ST[label="SlickText", fillcolor="#F3E5F5"];
+  }
+  subgraph cluster_prov_email {
+    label="Email Provider";
+    color="#cfcfcf";
+    MD[label="Mandrill", fillcolor="#F3E5F5"];
+  }
+
+  /* ===== Human handoff (for contrast) ===== */
+  ESC[label="Human handoff\n(Slack/Ticket)", fillcolor="#FFEBEE"];
+
+  /* ===== Flows showing n8n’s role ===== */
+
+  /* Brain → n8n for outbound */
+  ORCH -> SMSWF  [label="send_sms"];
+  ORCH -> EMAILWF[label="send_email"];
+  ORCH -> ESC    [label="escalate (direct, not via n8n)"];
+
+  /* n8n → providers */
+  SMSWF  -> ST    [label="POST /messages"];
+  EMAILWF-> MD    [label="POST /messages"];
+
+  /* Providers → n8n webhook */
+  ST -> N8NWH     [label="delivery / fail"];
+  MD -> N8NWH     [label="delivered / bounced / spam"];
+
+  /* n8n webhook → DB normalization */
+  N8NWH -> EVT_S  [label="insert staging (sms)"];
+  N8NWH -> EVT_E  [label="insert staging (email)"];
+  N8NWH -> INT    [label="upsert interactions\n(provider_ref, status)"];
+
+  /* Interactions inform the brain’s progression */
+  INT -> PROG     [label="map outcome\nsuccess/failed"];
+
+  /* Optional scheduler helper (not required if pg_cron used) */
+  CRON -> ORCH    [style=dashed, label="periodic triggers\n(ex: reconciler)"];
+
+  /* ===== Notes ===== */
+  NOTE[shape=note, fillcolor="#FFFDE7",
+       label="n8n responsibilities:\n• credentials & auth\n• API retries/backoff\n• payload mapping/validation\n• webhook verification & dedupe\n• normalization into DB\n\nNot n8n:\n• campaign policy\n• step selection\n• escalation rules (that’s LangGraph)"];
+  cluster_n8n -> NOTE [style=dotted, arrowhead=none];
+}

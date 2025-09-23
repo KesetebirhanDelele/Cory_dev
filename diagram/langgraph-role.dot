@@ -1,0 +1,84 @@
+digraph LangGraphRole {
+  rankdir=LR;
+  node [shape=box, style="rounded,filled", fillcolor="#f7f7f9", color="#999", fontname="Inter,Arial"];
+  edge [color="#666", fontname="Inter,Arial"];
+
+  /* ==== Data layer ==== */
+  subgraph cluster_db {
+    label="Supabase (source of truth)";
+    color="#cfcfcf";
+    CE [label="public.campaign_enrollments\n(step_index • attempts • next_run_at)"];
+    CS [label="public.campaign_steps\n(allowed_channels • prompts • pacing)"];
+    C  [label="public.campaigns\n(max_attempts • policy)"];
+    INT[label="public.interactions\n(channel • provider_ref • status)"];
+  }
+
+  /* ==== Scheduler ==== */
+  S  [label="Scheduler / cron\nselect due enrollments", fillcolor="#E1F5FE"];
+
+  /* ==== LangGraph brain (the role) ==== */
+  subgraph cluster_lg {
+    label="LangGraph Orchestrator (brain)";
+    color="#bdbdbd";
+    style="rounded";
+
+    CL [label="classify_lead\n(intent • confidence • suggested_channel)", fillcolor="#FFFDE7"];
+    CO [label="orchestrate_communication\n(send_voice/sms/email • escalate)", fillcolor="#FFFDE7"];
+    PR [label="progress_campaign\n(advance • backoff • schedule next_run_at)", fillcolor="#FFFDE7"];
+    CL -> CO -> PR -> CL;  /* stateful loop */
+  }
+
+  /* ==== Adapters / Providers ==== */
+  subgraph cluster_exec {
+    label="Execution (adapters / n8n / providers)";
+    color="#cfcfcf";
+    N8_SMS [label="n8n: send_sms"];
+    N8_EML [label="n8n: send_email"];
+    SYN    [label="Synthflow (voice)"];
+    HH     [label="Human handoff\n(Slack/Ticket)", fillcolor="#FFEBEE"];
+  }
+
+  /* ==== Webhooks ==== */
+  subgraph cluster_hooks {
+    label="Webhooks";
+    color="#cfcfcf";
+    WB_SF  [label="/webhooks/synthflow", shape=folder, fillcolor="#FFF3E0"];
+    WB_CMP [label="/webhooks/campaign",  shape=folder, fillcolor="#FFF3E0"];
+  }
+
+  /* ==== Wiring that shows the role ==== */
+
+  /* Scheduler feeds the brain with due work */
+  S -> CL [label="due enrollment\n(next_run_at ≤ now)"];
+
+  /* Brain reads state & policy to decide */
+  CE -> CL [style=dashed, label="read state"];
+  CS -> CL [style=dashed, label="step config"];
+  C  -> CL [style=dashed, label="policy"];
+
+  /* Brain fans out to execution layer (does not talk to vendors directly) */
+  CO -> SYN    [label="send_voice"];
+  CO -> N8_SMS [label="send_sms"];
+  CO -> N8_EML [label="send_email"];
+  CO -> HH     [label="escalate"];
+
+  /* Providers call back via webhooks → DB → brain progresses */
+  SYN   -> WB_SF  [label="call events"];
+  N8_SMS-> WB_CMP [label="delivery/fail"];
+  N8_EML-> WB_CMP [label="delivered/bounced"];
+
+  WB_SF  -> INT;
+  WB_CMP -> INT;
+
+  /* Interactions/outcomes inform progression */
+  INT -> PR [label="map to success/failed"];
+
+  /* Progress writes schedule back to DB and loop continues */
+  PR -> CE [label="update attempts/step"];
+  PR -> S  [label="write next_run_at"];
+
+  /* ==== Notes explaining LangGraph’s role ==== */
+  NOTE [shape=note, fillcolor="#FFFDE7",
+        label="LangGraph responsibilities:\n• policy/guardrails (max_attempts, quiet hours)\n• branching by intent + status\n• retries/backoff + pacing\n• dynamic rerouting + escalation"];
+  CL -> NOTE [style=dotted, arrowhead=none];
+}
