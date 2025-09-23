@@ -1,0 +1,105 @@
+digraph G {
+  rankdir=TB;
+  fontsize=11;
+  node [shape=box, style="rounded,filled", fillcolor="#f7f7f9", color="#999", fontname="Inter,Arial"];
+  edge [color="#666", fontname="Inter,Arial"];
+
+  /* ===== Supabase DB ===== */
+  subgraph cluster_db {
+    label="Supabase";
+    color="#bdbdbd";
+    C  [label="public.campaigns"];
+    CS [label="public.campaign_steps"];
+    CE [label="public.campaign_enrollments\n- current_step_index\n- next_channel\n- next_run_at\n- attempts"];
+    EV1[label="public.stg_voice_events"];
+    EV2[label="public.stg_sms_events"];
+    EV3[label="public.stg_email_events"];
+    INT[label="public.interactions"];
+  }
+
+  /* ===== Builders & Enrollment ===== */
+  B  [label="Campaign Builder Agent", fillcolor="#E8F5E9"];
+  E  [label="Enrollment Agent", fillcolor="#E8F5E9"];
+
+  B -> C  [label="create/maintain"];
+  B -> CS;
+  E -> CE  [label="enroll contact"];
+
+  /* ===== Scheduler ===== */
+  subgraph cluster_sched {
+    label="Scheduler";
+    color="#bdbdbd";
+    CRON [label="cron / job runner", fillcolor="#E3F2FD"];
+  }
+
+  /* ===== LangGraph Orchestrator ===== */
+  subgraph cluster_orch {
+    label="LangGraph Orchestrator";
+    color="#bdbdbd";
+    CL [label="classify_lead\n(intent, next_action, channel, escalation_required)", fillcolor="#FFFDE7"];
+    CO [label="orchestrate_communication\n(voice / sms / email / escalate)", fillcolor="#FFFDE7"];
+    PR [label="progress_campaign\n(advance / reschedule / backoff)", fillcolor="#FFFDE7"];
+    CL -> CO -> PR -> CL;  /* internal loop */
+  }
+
+  /* Scheduler tick into the graph */
+  CRON -> CL [label="every 1m:\nSELECT enrollments WHERE next_run_at ≤ now()"];
+
+  /* ===== External providers & n8n ===== */
+  subgraph cluster_voice {
+    label="Voice Provider";
+    color="#bdbdbd";
+    SF [label="Synthflow", fillcolor="#F3E5F5"];
+  }
+
+  subgraph cluster_sms {
+    label="SMS Provider";
+    color="#bdbdbd";
+    ST [label="SlickText", fillcolor="#F3E5F5"];
+  }
+
+  subgraph cluster_email {
+    label="Email Provider";
+    color="#bdbdbd";
+    MD [label="Mandrill", fillcolor="#F3E5F5"];
+  }
+
+  subgraph cluster_n8n {
+    label="n8n workflows";
+    color="#bdbdbd";
+    N8N_SMS  [label="send_sms",  fillcolor="#E1F5FE"];
+    N8N_EMAIL[label="send_email",fillcolor="#E1F5FE"];
+    N8N_HOOK [label="/webhooks/campaign", shape=folder, fillcolor="#E1F5FE"];
+  }
+
+  /* Webhooks (direct) */
+  WB_SF  [label="/webhooks/synthflow", shape=folder, fillcolor="#FFF3E0"];
+  WB_CMP [label="/webhooks/campaign",  shape=folder, fillcolor="#FFF3E0"];
+
+  /* Fan-out from orchestrate_communication */
+  CO -> SF      [label="send_voice"];
+  CO -> N8N_SMS [label="send_sms"];
+  CO -> N8N_EMAIL [label="send_email"];
+  CO -> HH      [label="escalate_to_human"];
+  HH [label="Human Handoff\n(Slack / Ticket)", fillcolor="#FFEBEE"];
+
+  /* Provider callbacks → DB staging */
+  SF -> WB_SF -> EV1;
+  N8N_SMS -> ST -> WB_CMP -> EV2;
+  N8N_EMAIL -> MD -> WB_CMP -> EV3;
+
+  /* Event processing / metrics via n8n hook */
+  WB_SF  -> N8N_HOOK;
+  WB_CMP -> N8N_HOOK;
+  N8N_HOOK -> INT;
+  INT -> CE [label="update attempts/outcomes\n& schedule next_run_at"];
+
+  /* DB lookups that influence branching */
+  CE -> CL  [style=dashed, label="read enrollment"];
+  CS -> CL  [style=dashed, label="step definition"];
+  C  -> CL  [style=dashed, label="campaign policy\n(max_attempts, pacing)"];
+
+  /* Styling ranks (optional) */
+  {rank=same; B; E;}
+  {rank=same; CRON;}
+}

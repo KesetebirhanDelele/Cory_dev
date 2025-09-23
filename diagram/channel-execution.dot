@@ -1,0 +1,85 @@
+digraph ChannelExecution {
+  rankdir=LR;
+  fontname="Inter,Arial";
+  node [shape=box, style="rounded,filled", fillcolor="#f7f7f9", color="#999", fontname="Inter,Arial"];
+  edge [color="#666", fontname="Inter,Arial"];
+
+  /* ---------- LangGraph side ---------- */
+  ORCH [label="LangGraph Orchestrator\n(orchestrate_communication)"];
+  DEC  [label="next_action\nsend_voice | send_sms | send_email | escalate"];
+  PROG [label="progress_campaign\n(advance / reschedule / backoff)"];
+
+  ORCH -> DEC;
+
+  /* ---------- n8n workflows ---------- */
+  subgraph cluster_n8n {
+    label="n8n workflows";
+    color="#cfcfcf";
+    N8N_SMS   [label="send_sms (workflow)", fillcolor="#E1F5FE"];
+    N8N_EMAIL [label="send_email (workflow)", fillcolor="#E1F5FE"];
+    N8N_HOOK  [label="/webhooks/campaign", shape=folder, fillcolor="#E1F5FE"];
+  }
+
+  /* ---------- Providers ---------- */
+  subgraph cluster_voice {
+    label="Voice Provider";
+    color="#cfcfcf";
+    SF [label="Synthflow", fillcolor="#F3E5F5"];
+  }
+
+  subgraph cluster_sms {
+    label="SMS Provider";
+    color="#cfcfcf";
+    ST [label="SlickText", fillcolor="#F3E5F5"];
+  }
+
+  subgraph cluster_email {
+    label="Email Provider";
+    color="#cfcfcf";
+    MD [label="Mandrill", fillcolor="#F3E5F5"];
+  }
+
+  /* ---------- Webhook endpoints ---------- */
+  WB_SF  [label="/webhooks/synthflow", shape=folder, fillcolor="#FFF3E0"];
+  WB_CMP [label="/webhooks/campaign",  shape=folder, fillcolor="#FFF3E0"];
+
+  /* ---------- DB write points ---------- */
+  INT [label="public.interactions\n(status • provider_ref • channel)"];
+  EVT_V [label="public.stg_voice_events"];
+  EVT_S [label="public.stg_sms_events"];
+  EVT_E [label="public.stg_email_events"];
+
+  /* ---------- Fan-out from next_action ---------- */
+  DEC -> N8N_SMS   [label="send_sms"];
+  DEC -> N8N_EMAIL [label="send_email"];
+  DEC -> SF        [label="send_voice"];
+  DEC -> ESC       [label="escalate_to_human"];
+  ESC [label="Human handoff\n(Slack/Ticket)", fillcolor="#FFEBEE"];
+
+  /* ---------- SMS path ---------- */
+  N8N_SMS -> ST    [label="POST /messages"];
+  ST -> WB_CMP     [label="delivery/bounce/fail"];
+  WB_CMP -> EVT_S;
+  /* n8n webhook also normalizes and logs */
+  WB_CMP -> N8N_HOOK -> INT;
+
+  /* ---------- Email path ---------- */
+  N8N_EMAIL -> MD  [label="POST /messages"];
+  MD -> WB_CMP     [label="delivered/bounced/spam"];
+  WB_CMP -> EVT_E;
+  WB_CMP -> N8N_HOOK -> INT;
+
+  /* ---------- Voice path ---------- */
+  SF -> WB_SF      [label="ringing/completed/failed"];
+  WB_SF -> EVT_V;
+  WB_SF -> INT;
+
+  /* ---------- Back to orchestrator ---------- */
+  INT -> PROG  [label="outcome mapped\nsuccess/failed"];
+  PROG -> ORCH [label="loop\nadvance or retry with backoff"];
+
+  /* ---------- Notes (dashed) ---------- */
+  N8 [shape=note, style="filled", fillcolor="#FFFDE7",
+      label="n8n handles:\n• provider auth & payloads\n• retries/backoff\n• idempotency keys\n• normalization → interactions"];
+  N8N_HOOK -> N8 [style=dashed, arrowhead=none];
+}

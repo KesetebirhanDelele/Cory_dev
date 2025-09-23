@@ -1,0 +1,230 @@
+<?xml version="1.0" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1190pt" height="747pt" viewBox="0.00 0.00 1190.00 747.00">
+<g id="graph0" class="graph" transform="translate(4,743) scale(1)" data-name="ClassifierBranching">
+
+<polygon fill="white" stroke="none" points="-4,4 -4,-743 1186,-743 1186,4 -4,4"/>
+<g id="clust1" class="cluster" data-name="cluster_inputs">
+
+<polygon fill="none" stroke="#cfcfcf" points="8,-648.6 8,-731 1174,-731 1174,-648.6 8,-648.6"/>
+<text text-anchor="middle" x="591" y="-714.4" font-family="Inter,Arial" font-size="14.00">Inputs</text>
+</g>
+<g id="clust2" class="cluster" data-name="cluster_classifier">
+
+<polygon fill="none" stroke="#cfcfcf" points="364,-80.8 364,-629.6 868,-629.6 868,-80.8 364,-80.8"/>
+<text text-anchor="middle" x="616" y="-613" font-family="Inter,Arial" font-size="14.00">Classifier Node</text>
+</g>
+<!-- E -->
+<g id="node1" class="node" pointer-events="visible" data-name="E">
+
+<path fill="#f7f7f9" stroke="#000000" d="M279.84,-698C279.84,-698 28.16,-698 28.16,-698 22.16,-698 16.16,-692 16.16,-686 16.16,-686 16.16,-668.8 16.16,-668.8 16.16,-662.8 22.16,-656.8 28.16,-656.8 28.16,-656.8 279.84,-656.8 279.84,-656.8 285.84,-656.8 291.84,-662.8 291.84,-668.8 291.84,-668.8 291.84,-686 291.84,-686 291.84,-692 285.84,-698 279.84,-698"/>
+<text text-anchor="middle" x="154" y="-681.6" font-family="Inter,Arial" font-size="14.00">Enrollment state</text>
+<text text-anchor="middle" x="154" y="-664.8" font-family="Inter,Arial" font-size="14.00">lead_id • step_index • attempts • last_result</text>
+</g>
+<!-- G1 -->
+<g id="node5" class="node" pointer-events="visible" data-name="G1">
+
+<path fill="#f7f7f9" stroke="#000000" d="M547.37,-593.95C547.37,-593.95 406.1,-558.15 406.1,-558.15 400.29,-556.67 400.29,-553.73 406.1,-552.25 406.1,-552.25 547.37,-516.45 547.37,-516.45 553.18,-514.97 564.82,-514.97 570.63,-516.45 570.63,-516.45 711.9,-552.25 711.9,-552.25 717.71,-553.73 717.71,-556.67 711.9,-558.15 711.9,-558.15 570.63,-593.95 570.63,-593.95 564.82,-595.43 553.18,-595.43 547.37,-593.95"/>
+<text text-anchor="middle" x="559" y="-559.4" font-family="Inter,Arial" font-size="14.00">attempts &gt;= max_attempts</text>
+<text text-anchor="middle" x="559" y="-542.6" font-family="Inter,Arial" font-size="14.00">OR do_not_call?</text>
+</g>
+<!-- E&#45;&gt;G1 -->
+<g id="edge1" class="edge" data-name="E-&gt;G1">
+
+<path fill="none" stroke="#000000" d="M221.33,-656.42C290.47,-635.9 398.3,-603.89 473.44,-581.59"/>
+<polygon fill="#000000" stroke="#000000" points="474.24,-585.01 482.83,-578.81 472.25,-578.3 474.24,-585.01"/>
+</g>
+<!-- S -->
+<g id="node2" class="node" pointer-events="visible" data-name="S">
+
+<path fill="#f7f7f9" stroke="#000000" d="M849.85,-698C849.85,-698 586.15,-698 586.15,-698 580.15,-698 574.15,-692 574.15,-686 574.15,-686 574.15,-668.8 574.15,-668.8 574.15,-662.8 580.15,-656.8 586.15,-656.8 586.15,-656.8 849.85,-656.8 849.85,-656.8 855.85,-656.8 861.85,-662.8 861.85,-668.8 861.85,-668.8 861.85,-686 861.85,-686 861.85,-692 855.85,-698 849.85,-698"/>
+<text text-anchor="middle" x="718" y="-681.6" font-family="Inter,Arial" font-size="14.00">Step config</text>
+<text text-anchor="middle" x="718" y="-664.8" font-family="Inter,Arial" font-size="14.00">allowed_channels • fallback_channel • prompt</text>
+</g>
+<!-- S&#45;&gt;G1 -->
+<g id="edge2" class="edge" data-name="S-&gt;G1">
+
+<path fill="none" stroke="#000000" d="M691.74,-656.55C669.24,-639.54 636.2,-614.56 608.71,-593.78"/>
+<polygon fill="#000000" stroke="#000000" points="610.92,-591.06 600.83,-587.82 606.7,-596.65 610.92,-591.06"/>
+</g>
+<!-- G3 -->
+<g id="node8" class="node" pointer-events="visible" data-name="G3">
+
+<path fill="#f7f7f9" stroke="#000000" d="M624.2,-258.7C624.2,-258.7 424.08,-221.4 424.08,-221.4 418.18,-220.3 418.18,-218.1 424.08,-217 424.08,-217 624.2,-179.7 624.2,-179.7 630.1,-178.6 641.9,-178.6 647.8,-179.7 647.8,-179.7 847.92,-217 847.92,-217 853.82,-218.1 853.82,-220.3 847.92,-221.4 847.92,-221.4 647.8,-258.7 647.8,-258.7 641.9,-259.8 630.1,-259.8 624.2,-258.7"/>
+<text text-anchor="middle" x="636" y="-223.4" font-family="Inter,Arial" font-size="14.00">confidence &gt;= confidence_min</text>
+<text text-anchor="middle" x="636" y="-206.6" font-family="Inter,Arial" font-size="14.00">AND suggested_channel ∈ allowed?</text>
+</g>
+<!-- S&#45;&gt;G3 -->
+<g id="edge10" class="edge" data-name="S-&gt;G3">
+
+<path fill="none" stroke="#000000" stroke-dasharray="5,2" d="M729.7,-656.3C742.13,-633.02 760,-593.12 760,-556.2 760,-556.2 760,-556.2 760,-341.8 760,-305.89 733.16,-277.07 704.45,-256.52"/>
+<polygon fill="#000000" stroke="#000000" points="706.58,-253.73 696.35,-250.99 702.63,-259.52 706.58,-253.73"/>
+<text text-anchor="middle" x="810.15" y="-438.6" font-family="Inter,Arial" font-size="14.00">allowed_channels</text>
+</g>
+<!-- P -->
+<g id="node3" class="node" pointer-events="visible" data-name="P">
+
+<path fill="#f7f7f9" stroke="#000000" d="M1153.83,-698C1153.83,-698 892.17,-698 892.17,-698 886.17,-698 880.17,-692 880.17,-686 880.17,-686 880.17,-668.8 880.17,-668.8 880.17,-662.8 886.17,-656.8 892.17,-656.8 892.17,-656.8 1153.83,-656.8 1153.83,-656.8 1159.83,-656.8 1165.83,-662.8 1165.83,-668.8 1165.83,-668.8 1165.83,-686 1165.83,-686 1165.83,-692 1159.83,-698 1153.83,-698"/>
+<text text-anchor="middle" x="1023" y="-681.6" font-family="Inter,Arial" font-size="14.00">Policy</text>
+<text text-anchor="middle" x="1023" y="-664.8" font-family="Inter,Arial" font-size="14.00">max_attempts • confidence_min • quiet_hours</text>
+</g>
+<!-- P&#45;&gt;G1 -->
+<g id="edge3" class="edge" data-name="P-&gt;G1">
+
+<path fill="none" stroke="#000000" d="M945.6,-656.35C864.33,-635.3 736.61,-602.21 650.43,-579.89"/>
+<polygon fill="#000000" stroke="#000000" points="651.37,-576.51 640.81,-577.39 649.62,-583.29 651.37,-576.51"/>
+</g>
+<!-- P&#45;&gt;G3 -->
+<g id="edge11" class="edge" data-name="P-&gt;G3">
+
+<path fill="none" stroke="#000000" stroke-dasharray="5,2" d="M1011.02,-656.34C998.3,-633.09 980,-593.21 980,-556.2 980,-556.2 980,-556.2 980,-341.8 980,-294.61 863.45,-261.15 766.04,-241.44"/>
+<polygon fill="#000000" stroke="#000000" points="766.84,-238.03 756.35,-239.51 765.48,-244.89 766.84,-238.03"/>
+<text text-anchor="middle" x="1025.09" y="-438.6" font-family="Inter,Arial" font-size="14.00">confidence_min</text>
+</g>
+<!-- X -->
+<g id="node4" class="node" pointer-events="visible" data-name="X">
+
+<path fill="#f7f7f9" stroke="#000000" d="M543.81,-698C543.81,-698 322.19,-698 322.19,-698 316.19,-698 310.19,-692 310.19,-686 310.19,-686 310.19,-668.8 310.19,-668.8 310.19,-662.8 316.19,-656.8 322.19,-656.8 322.19,-656.8 543.81,-656.8 543.81,-656.8 549.81,-656.8 555.81,-662.8 555.81,-668.8 555.81,-668.8 555.81,-686 555.81,-686 555.81,-692 549.81,-698 543.81,-698"/>
+<text text-anchor="middle" x="433" y="-681.6" font-family="Inter,Arial" font-size="14.00">External flags</text>
+<text text-anchor="middle" x="433" y="-664.8" font-family="Inter,Arial" font-size="14.00">CRM: do_not_call • timezone_ok • vip</text>
+</g>
+<!-- X&#45;&gt;G1 -->
+<g id="edge4" class="edge" data-name="X-&gt;G1">
+
+<path fill="none" stroke="#000000" d="M453.81,-656.55C470.96,-640.19 495.84,-616.45 517.1,-596.18"/>
+<polygon fill="#000000" stroke="#000000" points="519.43,-598.79 524.25,-589.35 514.6,-593.72 519.43,-598.79"/>
+</g>
+<!-- G2 -->
+<g id="node6" class="node" pointer-events="visible" data-name="G2">
+
+<path fill="#f7f7f9" stroke="#000000" d="M526.07,-459.5C526.07,-459.5 384.35,-444.1 384.35,-444.1 378.39,-443.45 378.39,-442.15 384.35,-441.5 384.35,-441.5 526.07,-426.1 526.07,-426.1 532.04,-425.45 543.96,-425.45 549.93,-426.1 549.93,-426.1 691.65,-441.5 691.65,-441.5 697.61,-442.15 697.61,-443.45 691.65,-444.1 691.65,-444.1 549.93,-459.5 549.93,-459.5 543.96,-460.15 532.04,-460.15 526.07,-459.5"/>
+<text text-anchor="middle" x="538" y="-438.6" font-family="Inter,Arial" font-size="14.00">timezone_ok? (quiet hours)</text>
+</g>
+<!-- G1&#45;&gt;G2 -->
+<g id="edge6" class="edge" data-name="G1-&gt;G2">
+
+<path fill="none" stroke="#000000" d="M551.54,-514.97C548.83,-500.73 545.83,-484.95 543.34,-471.87"/>
+<polygon fill="#000000" stroke="#000000" points="546.81,-471.39 541.5,-462.22 539.93,-472.7 546.81,-471.39"/>
+<text text-anchor="middle" x="554" y="-483" font-family="Inter,Arial" font-size="14.00">no</text>
+</g>
+<!-- OUT -->
+<g id="node9" class="node" pointer-events="visible" data-name="OUT">
+
+<path fill="#f7f7f9" stroke="#000000" d="M556.63,-124.8C556.63,-124.8 419.37,-124.8 419.37,-124.8 413.37,-124.8 407.37,-118.8 407.37,-112.8 407.37,-112.8 407.37,-100.8 407.37,-100.8 407.37,-94.8 413.37,-88.8 419.37,-88.8 419.37,-88.8 556.63,-88.8 556.63,-88.8 562.63,-88.8 568.63,-94.8 568.63,-100.8 568.63,-100.8 568.63,-112.8 568.63,-112.8 568.63,-118.8 562.63,-124.8 556.63,-124.8"/>
+<text text-anchor="middle" x="488" y="-102.6" font-family="Inter,Arial" font-size="14.00">Set next_action + channel</text>
+</g>
+<!-- G1&#45;&gt;OUT -->
+<g id="edge5" class="edge" data-name="G1-&gt;OUT">
+
+<path fill="none" stroke="#000000" d="M625.64,-530C682.31,-505.81 749.21,-466.32 713,-424.8 693.69,-402.65 610.22,-415 582,-406.8 546.32,-396.43 528.33,-401.69 505.98,-372 480.79,-338.53 520.86,-309.16 492,-278.8 464.2,-249.55 428.55,-292.04 403,-260.8 379.59,-232.18 387.19,-211.03 403,-177.6 411.94,-158.7 428.78,-143.19 445.13,-131.64"/>
+<polygon fill="#000000" stroke="#000000" points="447.01,-134.6 453.38,-126.14 443.12,-128.78 447.01,-134.6"/>
+<text text-anchor="middle" x="546.01" y="-338.6" font-family="Inter,Arial" font-size="14.00">yes (guardrail)</text>
+</g>
+<!-- Q -->
+<g id="node7" class="node" pointer-events="visible" data-name="Q">
+
+<path fill="#f7f7f9" stroke="#000000" d="M718.79,-372.2C718.79,-372.2 609.21,-372.2 609.21,-372.2 603.21,-372.2 597.21,-366.2 597.21,-360.2 597.21,-360.2 597.21,-325.4 597.21,-325.4 597.21,-319.4 603.21,-313.4 609.21,-313.4 609.21,-313.4 718.79,-313.4 718.79,-313.4 724.79,-313.4 730.79,-319.4 730.79,-325.4 730.79,-325.4 730.79,-360.2 730.79,-360.2 730.79,-366.2 724.79,-372.2 718.79,-372.2"/>
+<text text-anchor="middle" x="664" y="-355.4" font-family="Inter,Arial" font-size="14.00">LLM classify</text>
+<text text-anchor="middle" x="664" y="-338.6" font-family="Inter,Arial" font-size="14.00">→ intent, confidence,</text>
+<text text-anchor="middle" x="664" y="-321.8" font-family="Inter,Arial" font-size="14.00">   suggested_channel</text>
+</g>
+<!-- G2&#45;&gt;Q -->
+<g id="edge8" class="edge" data-name="G2-&gt;Q">
+
+<path fill="none" stroke="#000000" d="M557.69,-426.49C573.79,-413.97 597.2,-395.76 617.95,-379.61"/>
+<polygon fill="#000000" stroke="#000000" points="620.02,-382.44 625.77,-373.54 615.73,-376.91 620.02,-382.44"/>
+<text text-anchor="middle" x="610.33" y="-394.2" font-family="Inter,Arial" font-size="14.00">yes</text>
+</g>
+<!-- G2&#45;&gt;OUT -->
+<g id="edge7" class="edge" data-name="G2-&gt;OUT">
+
+<path fill="none" stroke="#000000" d="M514.93,-426.9C481.02,-403.55 418.75,-354.81 391.29,-295.6 374.31,-258.98 362.18,-179.2 388,-142.8 391.02,-138.55 394.59,-134.81 398.56,-131.53"/>
+<polygon fill="#000000" stroke="#000000" points="400.4,-134.5 406.58,-125.9 396.38,-128.77 400.4,-134.5"/>
+<text text-anchor="middle" x="441.35" y="-283" font-family="Inter,Arial" font-size="14.00">no → noop / delay</text>
+</g>
+<!-- Q&#45;&gt;G3 -->
+<g id="edge9" class="edge" data-name="Q-&gt;G3">
+
+<path fill="none" stroke="#000000" d="M657.36,-312.98C654.43,-300.22 650.88,-284.83 647.53,-270.29"/>
+<polygon fill="#000000" stroke="#000000" points="651.02,-269.83 645.36,-260.87 644.2,-271.4 651.02,-269.83"/>
+</g>
+<!-- G3&#45;&gt;OUT -->
+<g id="edge12" class="edge" data-name="G3-&gt;OUT">
+
+<path fill="none" stroke="#000000" d="M592,-185.38C569.09,-168.29 541.57,-147.76 520.59,-132.11"/>
+<polygon fill="#000000" stroke="#000000" points="522.78,-129.37 512.67,-126.2 518.59,-134.99 522.78,-129.37"/>
+<text text-anchor="middle" x="562.33" y="-147" font-family="Inter,Arial" font-size="14.00">yes</text>
+</g>
+<!-- G3&#45;&gt;OUT -->
+<g id="edge13" class="edge" data-name="G3-&gt;OUT">
+
+<path fill="none" stroke="#000000" d="M612.72,-181.38C602.73,-167.84 590.1,-153.27 576,-142.8 569.47,-137.95 562.17,-133.67 554.65,-129.91" style=""/>
+<polygon fill="#000000" stroke="#000000" points="556.22,-126.78 545.67,-125.75 553.28,-133.13 556.22,-126.78"/>
+<text text-anchor="middle" x="684.15" y="-147" font-family="Inter,Arial" font-size="14.00" style="">no → fallback_channel / escalate</text>
+</g>
+<!-- SV -->
+<g id="node10" class="node" pointer-events="visible" data-name="SV">
+
+<path fill="#f7f7f9" stroke="#000000" d="M205.48,-36C205.48,-36 150.52,-36 150.52,-36 144.52,-36 138.52,-30 138.52,-24 138.52,-24 138.52,-12 138.52,-12 138.52,-6 144.52,0 150.52,0 150.52,0 205.48,0 205.48,0 211.48,0 217.48,-6 217.48,-12 217.48,-12 217.48,-24 217.48,-24 217.48,-30 211.48,-36 205.48,-36"/>
+<text text-anchor="middle" x="178" y="-13.8" font-family="Inter,Arial" font-size="14.00">send_voice</text>
+</g>
+<!-- OUT&#45;&gt;SV -->
+<g id="edge14" class="edge" data-name="OUT-&gt;SV">
+
+<path fill="none" stroke="#000000" d="M406.99,-104.07C335.06,-101.07 236.58,-92.91 204.81,-70.8 196.54,-65.04 190.65,-55.93 186.54,-46.95"/>
+<polygon fill="#000000" stroke="#000000" points="189.82,-45.73 182.91,-37.69 183.3,-48.28 189.82,-45.73"/>
+<text text-anchor="middle" x="272.09" y="-58.2" font-family="Inter,Arial" font-size="14.00">next_action=send_voice</text>
+</g>
+<!-- SS -->
+<g id="node11" class="node" pointer-events="visible" data-name="SS">
+
+<path fill="#f7f7f9" stroke="#000000" d="M360.45,-36C360.45,-36 313.55,-36 313.55,-36 307.55,-36 301.55,-30 301.55,-24 301.55,-24 301.55,-12 301.55,-12 301.55,-6 307.55,0 313.55,0 313.55,0 360.45,0 360.45,0 366.45,0 372.45,-6 372.45,-12 372.45,-12 372.45,-24 372.45,-24 372.45,-30 366.45,-36 360.45,-36"/>
+<text text-anchor="middle" x="337" y="-13.8" font-family="Inter,Arial" font-size="14.00">send_sms</text>
+</g>
+<!-- OUT&#45;&gt;SS -->
+<g id="edge15" class="edge" data-name="OUT-&gt;SS">
+
+<path fill="none" stroke="#000000" d="M407.1,-97.04C388.7,-91.8 370.45,-83.59 356.35,-70.8 349.52,-64.61 345.1,-55.79 342.23,-47.17"/>
+<polygon fill="#000000" stroke="#000000" points="345.65,-46.41 339.68,-37.66 338.89,-48.23 345.65,-46.41"/>
+<text text-anchor="middle" x="419.83" y="-58.2" font-family="Inter,Arial" font-size="14.00">next_action=send_sms</text>
+</g>
+<!-- SE -->
+<g id="node12" class="node" pointer-events="visible" data-name="SE">
+
+<path fill="#f7f7f9" stroke="#000000" d="M515.76,-36C515.76,-36 460.24,-36 460.24,-36 454.24,-36 448.24,-30 448.24,-24 448.24,-24 448.24,-12 448.24,-12 448.24,-6 454.24,0 460.24,0 460.24,0 515.76,0 515.76,0 521.76,0 527.76,-6 527.76,-12 527.76,-12 527.76,-24 527.76,-24 527.76,-30 521.76,-36 515.76,-36"/>
+<text text-anchor="middle" x="488" y="-13.8" font-family="Inter,Arial" font-size="14.00">send_email</text>
+</g>
+<!-- OUT&#45;&gt;SE -->
+<g id="edge16" class="edge" data-name="OUT-&gt;SE">
+
+<path fill="none" stroke="#000000" d="M488,-88.65C488,-76.96 488,-61.19 488,-47.62"/>
+<polygon fill="#000000" stroke="#000000" points="491.5,-47.92 488,-37.92 484.5,-47.92 491.5,-47.92"/>
+<text text-anchor="middle" x="556.48" y="-58.2" font-family="Inter,Arial" font-size="14.00">next_action=send_email</text>
+</g>
+<!-- ESC -->
+<g id="node13" class="node" pointer-events="visible" data-name="ESC">
+
+<path fill="#f7f7f9" stroke="#000000" d="M697.79,-36C697.79,-36 598.21,-36 598.21,-36 592.21,-36 586.21,-30 586.21,-24 586.21,-24 586.21,-12 586.21,-12 586.21,-6 592.21,0 598.21,0 598.21,0 697.79,0 697.79,0 703.79,0 709.79,-6 709.79,-12 709.79,-12 709.79,-24 709.79,-24 709.79,-30 703.79,-36 697.79,-36"/>
+<text text-anchor="middle" x="648" y="-13.8" font-family="Inter,Arial" font-size="14.00">escalate_to_human</text>
+</g>
+<!-- OUT&#45;&gt;ESC -->
+<g id="edge17" class="edge" data-name="OUT-&gt;ESC">
+
+<path fill="none" stroke="#000000" d="M569.11,-98.12C589.48,-92.93 610.05,-84.48 626,-70.8 633.2,-64.63 638.1,-55.69 641.41,-46.98"/>
+<polygon fill="#000000" stroke="#000000" points="644.66,-48.31 644.35,-37.72 637.99,-46.19 644.66,-48.31"/>
+<text text-anchor="middle" x="695.75" y="-58.2" font-family="Inter,Arial" font-size="14.00">next_action=escalate</text>
+</g>
+<!-- NOP -->
+<g id="node14" class="node" pointer-events="visible" data-name="NOP">
+
+<path fill="#f7f7f9" stroke="#000000" d="M844.21,-36C844.21,-36 739.79,-36 739.79,-36 733.79,-36 727.79,-30 727.79,-24 727.79,-24 727.79,-12 727.79,-12 727.79,-6 733.79,0 739.79,0 739.79,0 844.21,0 844.21,0 850.21,0 856.21,-6 856.21,-12 856.21,-12 856.21,-24 856.21,-24 856.21,-30 850.21,-36 844.21,-36"/>
+<text text-anchor="middle" x="792" y="-13.8" font-family="Inter,Arial" font-size="14.00">noop (recheck later)</text>
+</g>
+<!-- OUT&#45;&gt;NOP -->
+<g id="edge18" class="edge" data-name="OUT-&gt;NOP">
+
+<path fill="none" stroke="#000000" d="M569.1,-102.83C637.25,-98.99 728.32,-90.29 759,-70.8 768.15,-64.98 775.24,-55.61 780.46,-46.43"/>
+<polygon fill="#000000" stroke="#000000" points="783.5,-48.19 784.89,-37.69 777.25,-45.03 783.5,-48.19"/>
+<text text-anchor="middle" x="825.6" y="-58.2" font-family="Inter,Arial" font-size="14.00">next_action=noop</text>
+</g>
+</g>
+</svg>
