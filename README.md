@@ -1,4 +1,4 @@
-# Cory_dev: proposed repo structure 
+# Cory_dev: proposed repo structure for implementation 
 /diagram/                    # DOT/Mermaid sources (render to svg for docs)
 /sql/                        # migrations & seeds
 /app/
