@@ -130,31 +130,31 @@ def test_end_to_end_voice_then_sms(
 
     # 0) Patch providers (no real network)
     try:
-        import providers.sms as p_sms
+        from app.channels.providers import sms as p_sms
         monkeypatch.setattr(p_sms, "send", sms_send, raising=True)
     except Exception:
         pass
     try:
-        import providers.email as p_email
+        from app.channels.providers import email as p_email
         monkeypatch.setattr(p_email, "send", email_send, raising=True)
     except Exception:
         pass
     try:
-        import providers.voice as p_voice
+        from app.channels.providers import voice as p_voice
         monkeypatch.setattr(p_voice, "place_call", voice_place_call, raising=True)
     except Exception:
         pass
 
     # Also stub sms sender so orchestrator doesn't nest asyncio.run()
     try:
-        import sms_sender
+        from app.channels import sms_sender
         monkeypatch.setattr(sms_sender, "run_sms_sender", lambda: None, raising=True)
     except Exception:
         pass
 
     # Provide supabase_repo.now_iso if product code imports it
     try:
-        import supabase_repo as sr
+        from app.data.supabase_repo import supabase_repo as sr
         if not hasattr(sr, "now_iso"):
             monkeypatch.setattr(
                 sr, "now_iso", lambda: datetime.now(timezone.utc).isoformat(), raising=False
@@ -244,7 +244,7 @@ def test_end_to_end_voice_then_sms(
     )
 
     # Make the call_processing_agent use the dev_nexus schema for sure
-    import call_processing_agent as cpa
+    import app.agents.call_processing_agent as cpa
     from tests.conftest import _SchemaPinnedClient, SCHEMA
 
     # ✅ Wrap with SchemaPinnedClient

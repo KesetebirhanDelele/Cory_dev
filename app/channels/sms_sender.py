@@ -5,8 +5,8 @@ import inspect
 import logging
 from datetime import datetime, timezone
 
-from providers.sms import send_sms
-from supabase_repo import fetch_due_sms_via_supabase, update_activity_via_supabase
+from app.channels.providers.sms import send_sms
+from app.data.supabase_repo import fetch_due_sms_via_supabase, update_activity_via_supabase
 # fetch/update helpers already exist and target the view/table we need. :contentReference[oaicite:1]{index=1} :contentReference[oaicite:2]{index=2}
 
 # Optional throttle between messages (ms). Set SMS_RATE_LIMIT_MS=250 etc in .env if desired.

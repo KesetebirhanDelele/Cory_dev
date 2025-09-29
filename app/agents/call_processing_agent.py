@@ -1,6 +1,6 @@
 # call_processing_agent.py
 
-from supabase_repo import sb
+from app.data.supabase_repo import sb
 from datetime import datetime, timezone, timedelta
 import os
 

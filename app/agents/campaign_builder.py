@@ -1,6 +1,6 @@
 # campaign_builder.py
 import uuid
-from supabase_repo import sb, SCHEMA  # or use asyncpg from db.py
+from app.data.supabase_repo import sb, SCHEMA  # or use asyncpg from db.py
 
 def create_campaign(org_id: str, name: str, goal: str, campaign_type="live") -> str:
     resp = (sb.postgrest.schema(SCHEMA)

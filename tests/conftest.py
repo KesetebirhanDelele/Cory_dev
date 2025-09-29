@@ -189,7 +189,7 @@ def resolve_org_and_goal(sb: Any):
 # --- Builder adapters ---
 @pytest.fixture(scope="session")
 def builder_funcs(supabase):
-    import campaign_builder as cb
+    import app.agents.campaign_builder as cb
     create_fn = _get_fn(cb, "create_campaign", "create_or_update_campaign")
     # We write steps directly to campaign_steps via REST to stay schema-safe.
 
@@ -318,7 +318,7 @@ def enroll_funcs(supabase):
 # tests/conftest.py
 @pytest.fixture(scope="session")
 def orchestrator_funcs():
-    import orchestrator_loop as loop
+    import app.orchestrator.loop as loop
     # IMPORTANT: prefer a one-shot function first
     run_once = _get_fn(loop, "tick", "run_once", "tick_once", "main")
     return dict(run_once=run_once)
@@ -327,7 +327,7 @@ def orchestrator_funcs():
 # --- Call-processing adapter (force module to use the test schema) ---
 @pytest.fixture(scope="session")
 def call_processing_funcs(supabase):
-    import call_processing_agent as cpa
+    import app.agents.call_processing_agent as cpa
     pinned = _SchemaPinnedClient(supabase, SCHEMA)
 
     # 1) Point every likely handle at the pinned client
@@ -381,14 +381,14 @@ def set_test_mode(monkeypatch):
 
     # Avoid nested asyncio.run() inside sms_sender during orchestrator tests
     try:
-        import sms_sender
+        from app.channels import sms_sender
         monkeypatch.setattr(sms_sender, "run_sms_sender", lambda: None, raising=True)
     except Exception:
         pass
 
     # Provide supabase_repo.now_iso if product code imports it
     try:
-        import supabase_repo as sr
+        import app.data.supabase_repo as sr
         if not hasattr(sr, "now_iso"):
             monkeypatch.setattr(sr, "now_iso", lambda: datetime.now(timezone.utc).isoformat(), raising=False)
     except Exception:
