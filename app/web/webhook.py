@@ -1,6 +1,6 @@
 # webhook.py
 from fastapi import FastAPI, Request
-from db import upsert_staging
+from app.data.db import upsert_staging
 import uvicorn
 
 app = FastAPI()

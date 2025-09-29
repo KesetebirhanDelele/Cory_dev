@@ -102,7 +102,7 @@ async def worker_loop(name: str, tick: Callable[[], "asyncio.Future"], interval:
 async def maybe_init_db():
     if DB_BACKEND == "asyncpg":
         try:
-            from db import init_db_pool  # your asyncpg pool initializer
+            from app.data.db import init_db_pool  # your asyncpg pool initializer
             await init_db_pool()
             logging.info("Initialized asyncpg pool.")
         except Exception as ex:

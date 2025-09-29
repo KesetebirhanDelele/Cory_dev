@@ -5,7 +5,7 @@ import inspect
 import logging
 from datetime import datetime, timezone
 
-from supabase_repo import sb  # uses SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+from app.data.supabase_repo import sb  # uses SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
 try:
     # Implement this later with your real provider (e.g., Mandrill/SendGrid)
     # Signature expected: send_email(to_email: str, subject: str, body: str) -> provider_ref (str)

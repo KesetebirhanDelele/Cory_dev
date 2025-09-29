@@ -2,8 +2,8 @@
 import asyncio, os
 from datetime import datetime, timezone
 from dotenv import load_dotenv; load_dotenv()
-from supabase_repo import sb
-import sms_sender
+from app.data.supabase_repo import sb
+from app.channels import sms_sender
 
 SCHEMA = os.getenv("SUPABASE_SCHEMA", "dev_nexus")
 db = sb.postgrest.schema(SCHEMA)
@@ -19,7 +19,7 @@ async def tick():
 
     for row in due:
         # For DEV: simulate provider result immediately (success or fail)
-        from supabase_repo import now_iso
+        from app.data.supabase_repo import now_iso
         from uuid import uuid4
         # Example: alternate fail/succeed
         status = "failed" if hash(row["enrollment_id"]) % 2 == 0 else "completed"

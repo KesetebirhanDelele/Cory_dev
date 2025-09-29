@@ -1,6 +1,6 @@
 # voice_dialer.py
 from datetime import datetime, timezone
-from db import init_db_pool, fetch_due_actions, update_activity, insert_activity
+from app.data.db import init_db_pool, fetch_due_actions, update_activity, insert_activity
 from providers.voice import place_call
 
 # fetch_due_actions should surface enrollments with next_channel='voice' and next_run_at <= now

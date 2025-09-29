@@ -10,6 +10,7 @@ argcomplete==3.5.3
 asgiref==3.8.1
 asn1crypto==1.5.1
 asttokens==3.0.0
+asyncpg==0.30.0
 attrs==24.2.0
 auth0-python==4.9.0
 backoff==2.2.1
