@@ -128,6 +128,7 @@ create table if not exists dev_nexus.campaign_enrollments(
 create index if not exists ix_enroll_next on dev_nexus.campaign_enrollments(next_channel, next_run_at) where status='active';
 create index if not exists ix_enroll_contact_active on dev_nexus.campaign_enrollments(org_id, contact_id) where status='active';
 
+-- NEW: ensure one active enrollment per contact+campaign
 create table if not exists dev_nexus.campaign_activities(
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references dev_nexus.organizations(id),
