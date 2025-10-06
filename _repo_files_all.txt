@@ -9,9 +9,7 @@
 .pytest_cache\v\cache\lastfailed
 .pytest_cache\v\cache\nodeids
 .pytest_cache\v\cache\stepwise
-_repo_dirs_clean.txt
 _repo_files_all.txt
-_repo_tree_full.txt
 app
 app\__init__.py
 app\agents
@@ -66,6 +64,10 @@ app\orchestrator\temporal\workflows\campaign.py
 app\policy
 app\policy\__init__.py
 app\policy\guards.py
+app\repo
+app\repo\dtos.py
+app\repo\README.md
+app\repo\supabase_repo.py
 app\web
 app\web\__init__.py
 app\web\schemas.py
@@ -83,7 +85,7 @@ diagram\n8n-role.dot
 diagram\n8n-role.svg
 pytest.ini
 README.md
-repo_structure.ps
+repo_structure.ps1
 requirements-dev.txt
 seeding
 seeding\__init__.py
@@ -94,9 +96,12 @@ sql
 sql tests
 sql tests\test_plan.py
 sql tests\test_workflows.py
-sql\1. Supabase_tables.sql
-sql\2. Supabase_usp.sql
-sql\3. sms_view.sql
+sql\inventory_SQL_pack.sql
+sql\migrations
+sql\migrations\001_core_schema.sql
+sql\migrations\0012_b2_1_telemetry_view.sql
+sql\migrations\002_rls_roles.sql
+sql\migrations\README.MD
 system-flow.dot
 system-flow.svg
 tests
@@ -105,6 +110,10 @@ tests\conftest.py
 tests\fake_providers.py
 tests\integration
 tests\integration\test_campaign_workflow.py
+tests\sql
+tests\sql\test_rls.py
+tests\sql\test_schema.py
+tests\sql\test_schema_supabase_rpc.py
 tests\test_cory_e2e.py
 tests\test_orchestrator_routing.py
 tests\unit

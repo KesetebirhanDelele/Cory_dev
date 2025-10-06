@@ -1,24 +1,4 @@
-# Cory_dev: proposed repo structure for implementation 
-/diagram/                    # DOT/Mermaid sources (render to svg for docs)
-/sql/                        # migrations & seeds
-/app/
-  db.py                      # Supabase client + queries
-  models.py                  # pydantic state models
-  policies.py                # pacing/backoff/attempts
-  orchestrator_graph.py      # LangGraph brain (3 nodes)
-  adapters/
-    voice_synthflow.py
-    sms_n8n.py
-    email_n8n.py
-  webhooks/
-    synthflow.py
-    campaign.py
-  enrollment_agent.py
-  campaign_builder.py
-  scheduler.py               # cron worker / job runner
-  handoff.py                 # Slack/Ticket integration
-/tests/
-  unit/
-  integration/
-  fixtures/
-docs/README.md               # embeds rendered SVGs
+# Run below command in Powershell to get latest folder/file structure of working repo
+## Run this first if not in Cory_dev directory: 
+### PS C:\Users\keset\OneDrive\Documents\Internship\Cory_dev>
+$Exclude=@('.git','.testenv','node_modules','dist','build','.venv','.idea','.vscode','__pycache__');$root=(Get-Location).Path;$paths=Get-ChildItem -Recurse -Force | Where-Object{ $segs=$_.FullName.Substring($root.Length).Trim('\').Split('\'); ($segs|Where-Object{ $Exclude -contains $_ }).Count -eq 0 } | ForEach-Object{ $_.FullName.Substring($root.Length+1) } | Sort-Object;$paths | Out-File _repo_files_all.txt -Encoding utf8;"Paths written: $($paths.Count)"
