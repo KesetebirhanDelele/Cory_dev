@@ -48,12 +48,12 @@ SCHEMA = _schema_from_env()
 # ---------------- seed helpers ----------------
 async def _ensure_parents(conn, project_id, provider_id):
     async with conn.transaction():
+        # Force service_role within this session so RLS baseline allows writes
         await conn.execute(
             "SELECT set_config('request.jwt.claims', '{\"role\":\"service_role\"}', true);"
         )
 
         tenant_id = uuid4()
-        # avoid name collisions if there is a unique index on tenant.name
         tenant_name = f"Seed Tenant {project_id}"
 
         await conn.execute(
@@ -66,10 +66,9 @@ async def _ensure_parents(conn, project_id, provider_id):
             project_id, tenant_id
         )
 
-        # 👇 unique provider name so we never clash with other tests
         provider_name = f"SeedProvider-{provider_id}"  # unique per run
         await conn.execute(
-            f"insert into {SCHEMA}.providers (id, name) values ($1, $2) on conflict (id) do nothing",
+            f"INSERT INTO {SCHEMA}.providers (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
             provider_id, provider_name
         )
 
@@ -105,14 +104,14 @@ async def seed_minimum(conn: asyncpg.Connection):
 
 # ---------------- tests ----------------
 async def test_ordering_and_projection(asyncpg_pool):
-    # Assert we’re using the direct pool (no background tasks / no loop crossing)
     from tests.conftest import _DirectPool
     assert isinstance(asyncpg_pool, _DirectPool)
 
     async with asyncpg_pool.acquire() as conn:
         project_id = await seed_minimum(conn)
+        # Schema-qualify the RPC (now in dev_nexus)
         rows = await conn.fetch(
-            "SELECT * FROM telemetry_timeline($1, '-infinity'::timestamptz, 'infinity'::timestamptz, 100)",
+            f"SELECT * FROM {SCHEMA}.telemetry_timeline($1, '-infinity'::timestamptz, 'infinity'::timestamptz, 100)",
             project_id,
         )
 
@@ -122,6 +121,7 @@ async def test_ordering_and_projection(asyncpg_pool):
             assert (a["occurred_at"] < b["occurred_at"]) or (
                 a["occurred_at"] == b["occurred_at"] and a["event_pk"] <= b["event_pk"]
             )
+
         r = rows[0]
         assert set(r.keys()) == {
             "occurred_at", "event_pk", "event_kind", "project_id",
@@ -133,14 +133,16 @@ async def test_view_is_append_only(asyncpg_pool):
     assert isinstance(asyncpg_pool, _DirectPool)
 
     async with asyncpg_pool.acquire() as conn:
+        # Schema-qualify the view (now in dev_nexus)
         with pytest.raises(asyncpg.PostgresError):
-            await conn.execute("""UPDATE telemetry_view SET payload = payload || '{"x":1}'::jsonb""")
+            await conn.execute(f"""UPDATE {SCHEMA}.telemetry_view SET payload = payload || '{{"x":1}}'::jsonb""")
         with pytest.raises(asyncpg.PostgresError):
-            await conn.execute("DELETE FROM telemetry_view")
+            await conn.execute(f"DELETE FROM {SCHEMA}.telemetry_view")
         with pytest.raises(asyncpg.PostgresError):
             await conn.execute(
-                """
-                INSERT INTO telemetry_view(occurred_at, event_pk, event_kind, project_id, provider_id, provider_ref, direction, payload)
-                VALUES (now(), gen_random_uuid(), 'message', gen_random_uuid(), gen_random_uuid(), 'x', 'outbound', '{}'::jsonb)
+                f"""
+                INSERT INTO {SCHEMA}.telemetry_view
+                  (occurred_at, event_pk, event_kind, project_id, provider_id, provider_ref, direction, payload)
+                VALUES (now(), gen_random_uuid(), 'message', gen_random_uuid(), gen_random_uuid(), 'x', 'outbound', '{{}}'::jsonb)
                 """
             )

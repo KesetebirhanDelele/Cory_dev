@@ -63,18 +63,13 @@ def test_tables_exist():
     have = rows_to_set(rows, "table_name")
 
     expected = {
-        "tenant",
-        "project",
-        "contact",
-        "campaign",
-        "enrollment",
-        "outcome",
-        "handoff",
-        "providers",
-        "message",
-        "event",
-        "template",
-        "template_variant",
+        # core
+        "tenant","project","contact","campaign","enrollment","outcome","handoff",
+        "providers","message","event","template","template_variant",
+        # new campaign automation + staging
+        "campaign_step","campaign_activity","campaign_call_policy","phone_call_logs_stg",
+        # views also show up via information_schema.tables
+        "v_due_actions","v_due_sms_followups",
     }
 
     missing = expected - have
@@ -92,16 +87,26 @@ def test_foreign_keys_valid():
     }
 
     expected = {
-        ("project", "tenant_id", "tenant"),
-        ("contact", "project_id", "project"),
-        ("campaign", "project_id", "project"),
-        ("enrollment", "project_id", "project"),
-        ("enrollment", "campaign_id", "campaign"),
-        ("enrollment", "contact_id", "contact"),
-        ("message", "project_id", "project"),
-        ("event", "project_id", "project"),
-        ("outcome", "enrollment_id", "enrollment"),
-        ("handoff", "enrollment_id", "enrollment"),
+        # original
+        ("project","tenant_id","tenant"),
+        ("contact","project_id","project"),
+        ("campaign","project_id","project"),
+        ("enrollment","project_id","project"),
+        ("enrollment","campaign_id","campaign"),
+        ("enrollment","contact_id","contact"),
+        ("message","project_id","project"),
+        ("event","project_id","project"),
+        ("outcome","enrollment_id","enrollment"),
+        ("handoff","enrollment_id","enrollment"),
+        # new FKs
+        ("campaign_step","campaign_id","campaign"),
+        ("campaign_call_policy","campaign_id","campaign"),
+        ("campaign_activity","enrollment_id","enrollment"),
+        ("campaign_activity","campaign_id","campaign"),
+        ("campaign_activity","contact_id","contact"),
+        ("campaign_activity","step_id","campaign_step"),
+        ("phone_call_logs_stg","project_id","project"),
+        ("phone_call_logs_stg","provider_id","providers"),
     }
 
     missing = expected - triples
