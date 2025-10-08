@@ -24,9 +24,14 @@ def test_tables_exist():
     have = rows_to_set(rows, "table_name")
 
     expected = {
+        # core
         "enrollment","message","event","outcome",
         "template","template_variant","handoff",
-        "tenant","project","contact","campaign"
+        "tenant","project","contact","campaign","providers",
+        # new campaign automation + staging
+        "campaign_step","campaign_activity","campaign_call_policy","phone_call_logs_stg",
+        # views
+        "v_due_actions","v_due_sms_followups",
     }
     missing = expected - have
     assert not missing, f"Missing tables in schema {SCHEMA}: {sorted(missing)}"
@@ -37,6 +42,7 @@ def test_foreign_keys_valid():
     triples = {(r["child_table"], r["child_column"], r["parent_table"]) for r in rows}
 
     expected = {
+        # original
         ("project","tenant_id","tenant"),
         ("contact","project_id","project"),
         ("campaign","project_id","project"),
@@ -47,6 +53,15 @@ def test_foreign_keys_valid():
         ("event","project_id","project"),
         ("outcome","enrollment_id","enrollment"),
         ("handoff","enrollment_id","enrollment"),
+        # new FKs
+        ("campaign_step","campaign_id","campaign"),
+        ("campaign_call_policy","campaign_id","campaign"),
+        ("campaign_activity","enrollment_id","enrollment"),
+        ("campaign_activity","campaign_id","campaign"),
+        ("campaign_activity","contact_id","contact"),
+        ("campaign_activity","step_id","campaign_step"),
+        ("phone_call_logs_stg","project_id","project"),
+        ("phone_call_logs_stg","provider_id","providers"),
     }
     missing = expected - triples
     assert not missing, f"Missing FKs: {sorted(missing)}"
