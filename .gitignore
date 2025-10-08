@@ -1,4 +1,5 @@
 .env
-testenv.env
-testenv/
+.testenv.env
+.testenv/
 __pycache__/
+.gitignore
