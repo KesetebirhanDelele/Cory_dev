@@ -1,3 +1,4 @@
 .env
 testenv.env
 testenv/
+__pycache__/
