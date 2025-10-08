@@ -1,36 +1,45 @@
-# webhook.py
-from fastapi import FastAPI, Request
-from app.data.db import upsert_staging
-import uvicorn
+# app/web/webhook.py
+from fastapi import APIRouter, Request, BackgroundTasks, Header, HTTPException
+from typing import Optional
+from datetime import datetime
+import logging
 
-app = FastAPI()
+from app.web.schemas import normalize_webhook_event
 
-@app.post("/voice/webhook")
-async def voice_hook(req: Request):
-    payload = await req.json()
-    # map provider fields -> staging schema
-    row = {
-        "enrollment_id": payload.get("enrollment_id"),
-        "contact_id": payload.get("contact_id"),
-        "campaign_id": payload.get("campaign_id"),
-        "type_of_call": payload.get("type_of_call"),
-        "call_id": payload.get("call_id"),
-        "module_id": payload.get("module_id"),
-        "duration_seconds": payload.get("duration"),
-        "end_call_reason": payload.get("end_call_reason"),
-        "executed_actions": payload.get("executed_actions"),
-        "prompt_variables": payload.get("prompt_variables"),
-        "recording_url": payload.get("recording_url"),
-        "transcript": payload.get("transcript"),
-        "start_time_epoch_ms": payload.get("start_time_ms"),
-        "agent": payload.get("agent"),
-        "timezone": payload.get("timezone"),
-        "phone_number_to": payload.get("to"),
-        "phone_number_from": payload.get("from"),
-        "status": payload.get("status"),
-        "campaign_type": payload.get("campaign_type"),
-        "classification": payload.get("classification"),
-        "appointment_time": payload.get("appointment_time")
-    }
-    await upsert_staging(row)
-    return {"ok": True}
+router = APIRouter()
+logger = logging.getLogger("cory.webhook")
+
+
+@router.get("/healthz")
+async def healthz(request: Request):
+    """
+    Simple readiness/health endpoint used by tests & load balancers.
+    Returns a timestamp and allows middleware to attach X-Request-Id.
+    """
+    # return the timestamp so the response body is not empty
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
+
+@router.post("/webhooks/campaign/{campaign_id}")
+async def campaign_webhook(
+    campaign_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    x_signature: Optional[str] = Header(None),
+):
+    """
+    Minimal webhook handler that normalizes payloads and returns 422 on invalid payload.
+    (Background processing is left as a placeholder.)
+    """
+    body = await request.json()
+    try:
+        event = normalize_webhook_event(body)
+    except Exception as e:
+        logger.warning("invalid webhook payload", extra={"error": str(e)})
+        raise HTTPException(status_code=422, detail="invalid payload")
+
+    # Example placeholder for scheduling processing:
+    # background_tasks.add_task(process_event, campaign_id, event.model_dump())
+
+    return {"status": "received", "campaign_id": campaign_id}
+

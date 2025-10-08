@@ -1,0 +1,241 @@
+{
+  "webhook_event": {
+    "schema": {
+      "additionalProperties": false,
+      "description": "Canonical webhook event model used to normalize incoming signals.",
+      "properties": {
+        "event": {
+          "description": "Canonical event name, e.g. 'lead_created'",
+          "title": "Event",
+          "type": "string"
+        },
+        "channel": {
+          "description": "Channel: 'email'|'sms'|'voice'|'webhook'",
+          "title": "Channel",
+          "type": "string"
+        },
+        "timestamp": {
+          "description": "ISO8601 UTC timestamp",
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "lead_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lead Id"
+        },
+        "campaign_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Campaign Id"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "event",
+        "channel",
+        "timestamp"
+      ],
+      "title": "WebhookEvent",
+      "type": "object"
+    },
+    "example": {
+      "event": "lead_created",
+      "channel": "webhook",
+      "timestamp": "2025-10-06 12:00:00+00:00",
+      "payload": {
+        "first_name": "Alice",
+        "email": "a@example.com"
+      },
+      "lead_id": null,
+      "campaign_id": null,
+      "metadata": {}
+    }
+  },
+  "email_event": {
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "description": "Canonical event name, e.g. 'lead_created'",
+          "title": "Event",
+          "type": "string"
+        },
+        "channel": {
+          "const": "email",
+          "default": "email",
+          "title": "Channel",
+          "type": "string"
+        },
+        "timestamp": {
+          "description": "ISO8601 UTC timestamp",
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "description": "Must include 'to' and 'subject' for email",
+          "title": "Payload",
+          "type": "object"
+        },
+        "lead_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lead Id"
+        },
+        "campaign_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Campaign Id"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "event",
+        "timestamp",
+        "payload"
+      ],
+      "title": "EmailWebhookEvent",
+      "type": "object"
+    },
+    "example": {
+      "event": "email_received",
+      "channel": "email",
+      "timestamp": "2025-10-06 12:00:00+00:00",
+      "payload": {
+        "to": "a@example.com",
+        "subject": "Hello"
+      },
+      "lead_id": null,
+      "campaign_id": null,
+      "metadata": {}
+    }
+  },
+  "sms_event": {
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "description": "Canonical event name, e.g. 'lead_created'",
+          "title": "Event",
+          "type": "string"
+        },
+        "channel": {
+          "const": "sms",
+          "default": "sms",
+          "title": "Channel",
+          "type": "string"
+        },
+        "timestamp": {
+          "description": "ISO8601 UTC timestamp",
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "description": "Must include 'phone' and 'message' for sms",
+          "title": "Payload",
+          "type": "object"
+        },
+        "lead_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lead Id"
+        },
+        "campaign_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Campaign Id"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "event",
+        "timestamp",
+        "payload"
+      ],
+      "title": "SmsWebhookEvent",
+      "type": "object"
+    },
+    "example": {
+      "event": "sms_reply",
+      "channel": "sms",
+      "timestamp": "2025-10-06 12:00:00+00:00",
+      "payload": {
+        "phone": "+15551234567",
+        "message": "Yes"
+      },
+      "lead_id": null,
+      "campaign_id": null,
+      "metadata": {}
+    }
+  }
+}
