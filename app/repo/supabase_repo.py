@@ -1,13 +1,22 @@
 from __future__ import annotations
-import os, time, json
+import os, asyncio, time, json
 from typing import Any, Dict, Optional, Sequence, Tuple
 import requests
 from pydantic import BaseModel, ValidationError
 
 from .dtos import MessageDTO, EventDTO, LinkRefDTO, EnrollmentStatusDTO
+from supabase import create_client
 
 DEFAULT_TIMEOUT = 20
 RETRYABLE = (408, 429, 500, 502, 503, 504)
+
+class SupabaseRepo:
+    def __init__(self):
+        self.client = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+
+    async def rpc(self, fn_name: str, params: dict):
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: self.client.rpc(fn_name, params).execute())
 
 class SupabaseRepoConfig(BaseModel):
     base_url: str
