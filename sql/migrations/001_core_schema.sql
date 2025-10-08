@@ -192,10 +192,10 @@ create table if not exists dev_nexus.campaign_activity (
   error_message    text,
   created_at       timestamptz not null default now()
 );
-create index if not exists ix_activity_due       on dev_nexus.campaign_activity(status, due_at);
+create index if not exists ix_activity_due        on dev_nexus.campaign_activity(status, due_at);
 create index if not exists ix_activity_enrollment on dev_nexus.campaign_activity(enrollment_id, due_at);
-create index if not exists ix_activity_campaign  on dev_nexus.campaign_activity(campaign_id, status, due_at);
-create index if not exists ix_activity_contact   on dev_nexus.campaign_activity(contact_id, status);
+create index if not exists ix_activity_campaign   on dev_nexus.campaign_activity(campaign_id, status, due_at);
+create index if not exists ix_activity_contact    on dev_nexus.campaign_activity(contact_id, status);
 
 -- Staging for raw phone call logs (webhook drops)
 create table if not exists dev_nexus.phone_call_logs_stg (
@@ -354,7 +354,13 @@ begin
     limit 1;
 
     if found then
-      v_due_at := now() + make_interval(mins => coalesce(v_first_step.delay_minutes,0));
+      -- schedule immediately if delay <= 0, else honor delay
+      if coalesce(v_first_step.delay_minutes, 0) <= 0 then
+        v_due_at := now();
+      else
+        v_due_at := now() + make_interval(mins => v_first_step.delay_minutes);
+      end if;
+
       insert into dev_nexus.campaign_activity (
         enrollment_id, campaign_id, contact_id, step_id, channel, status, due_at
       ) values (
@@ -440,7 +446,13 @@ begin
     limit 1;
 
     if found then
-      v_next_due := now() + make_interval(mins => coalesce(v_next_step.delay_minutes,0));
+      -- schedule immediately if delay <= 0, else honor delay
+      if coalesce(v_next_step.delay_minutes, 0) <= 0 then
+        v_next_due := now();
+      else
+        v_next_due := now() + make_interval(mins => v_next_step.delay_minutes);
+      end if;
+
       insert into dev_nexus.campaign_activity (
         enrollment_id, campaign_id, contact_id, step_id, channel, status, due_at
       ) values (
@@ -500,7 +512,8 @@ grant execute on function dev_nexus.usp_ingestphonecalllogs() to service_role, a
 -- =================== Views ==========================
 -- ====================================================
 
--- Activities ready to run now
+-- Activities ready to run now (includes project_id for orchestrator filtering)
+drop view if exists dev_nexus.v_due_sms_followups;
 drop view if exists dev_nexus.v_due_actions;
 create view dev_nexus.v_due_actions as
 select
@@ -511,6 +524,7 @@ select
   a.step_id,
   a.channel,
   a.due_at,
+  cmp.project_id,                      -- NEW: enable project-scoped queries
   c.full_name,
   c.email,
   c.phone,
@@ -524,10 +538,9 @@ join dev_nexus.campaign cmp on cmp.id = a.campaign_id
 left join dev_nexus.campaign_step s on s.id = a.step_id
 where a.status = 'pending'
   and a.due_at <= now()
-order by a.due_at asc;
+order by a.due_at, a.id;
 
 -- SMS-only subset
-drop view if exists dev_nexus.v_due_sms_followups;
 create view dev_nexus.v_due_sms_followups as
 select *
 from dev_nexus.v_due_actions

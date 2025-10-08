@@ -1,4 +1,50 @@
 .env
-testenv.env
-testenv/
+.testenv.env
+.testenv/
 __pycache__/
+.gitignore
+tests\__pycache__/
+
+# Environment files
+.env
+.testenv.env
+.testenv/
+testenv/
+.venv/
+venv/
+
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Specific test cache folders
+app/__pycache__/
+app/channels/__pycache__/
+app/channels/providers/__pycache__/
+tests/__pycache__/
+tests/sql/__pycache__/
+tests/unit/__pycache__/
+tests/integration/__pycache__/
+
+# Pytest cache
+.pytest_cache/
+tests/.pytest_cache/
+
+# IDE and system files
+.vscode/
+.idea/
+.DS_Store
+
+# Logs and outputs
+*.log
+*.out
+*.err
+
+# Byte-compiled or temporary data
+*.egg-info/
+build/
+dist/
+
+

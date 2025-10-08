@@ -8,6 +8,14 @@ import signal
 import time
 from typing import Callable, Optional
 
+from fastapi import FastAPI
+from app.web.webhook import router as webhook_router
+
+app = FastAPI(title="Cory API")
+
+# Mount the webhook routes
+app.include_router(webhook_router)
+
 # Optional: load .env if present
 try:
     from dotenv import load_dotenv  # pip install python-dotenv
