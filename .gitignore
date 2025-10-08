@@ -20,6 +20,9 @@ __pycache__/
 *.pyd
 
 # Specific test cache folders
+app/__pycache__/
+app/channels/__pycache__/
+app/channels/providers/__pycache__/
 tests/__pycache__/
 tests/sql/__pycache__/
 tests/unit/__pycache__/
