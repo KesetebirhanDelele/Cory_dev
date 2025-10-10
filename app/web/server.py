@@ -1,18 +1,31 @@
 # app/web/server.py
 from fastapi import FastAPI
-from app.web.middleware import RequestIDMiddleware, LoggingMiddleware
+from datetime import datetime, timezone
+import asyncio
+
+from app.web.middleware import setup_middleware
 from app.web.webhook import router as webhook_router
+from app.web.idempotency_cache import IdempotencyCache
+
+app = FastAPI(title="Cory Admissions API")
+
+# ✅ Initialize idempotency cache and stub functions
+idempotency_cache = IdempotencyCache(ttl_seconds=300)
+app.state.idempotency = idempotency_cache
+app.state.processed_refs = idempotency_cache
 
 
-def create_app() -> FastAPI:
-    app = FastAPI(title="Cory Web API")
-    # RequestID should be added before Logging so request_id exists when Logging runs
-    app.add_middleware(RequestIDMiddleware)
-    app.add_middleware(LoggingMiddleware)
-    app.include_router(webhook_router)
-    return app
+async def dummy_process_event_fn(campaign_id, event):
+    await asyncio.sleep(0)
+    return {"ok": True, "campaign_id": campaign_id, "event": event.event}
 
+app.state.process_event_fn = dummy_process_event_fn
 
-# variable uvicorn / test clients will import
-app = create_app()
- 
+# Attach middleware
+setup_middleware(app)
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+app.include_router(webhook_router, prefix="/webhooks")

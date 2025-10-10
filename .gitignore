@@ -1,22 +1,3 @@
-<<<<<<< HEAD
-testenv.env
-__pycache__
-
-.env
-.testenv.env
-.testenv/
-_pycache_/
-.gitignore
-tests\_pycache_/
-=======
-.env
-.testenv.env
-.testenv/
-__pycache__/
-.gitignore
-tests\__pycache__/
->>>>>>> e973d90532466ed169011c769916cfc718b53043
-
 # Environment files
 .env
 .testenv.env
@@ -26,25 +7,12 @@ testenv/
 venv/
 
 # Python cache and build artifacts
-<<<<<<< HEAD
-_pycache_/
-=======
 __pycache__/
->>>>>>> e973d90532466ed169011c769916cfc718b53043
 *.py[cod]
 *.pyo
 *.pyd
 
 # Specific test cache folders
-<<<<<<< HEAD
-app/_pycache_/
-app/channels/_pycache_/
-app/channels/providers/_pycache_/
-tests/_pycache_/
-tests/sql/_pycache_/
-tests/unit/_pycache_/
-tests/integration/_pycache_/
-=======
 app/__pycache__/
 app/channels/__pycache__/
 app/channels/providers/__pycache__/
@@ -53,7 +21,6 @@ tests/sql/__pycache__/
 tests/unit/__pycache__/
 tests/integration/__pycache__/
 
->>>>>>> e973d90532466ed169011c769916cfc718b53043
 # Pytest cache
 .pytest_cache/
 tests/.pytest_cache/
@@ -71,10 +38,4 @@ tests/.pytest_cache/
 # Byte-compiled or temporary data
 *.egg-info/
 build/
-<<<<<<< HEAD
 dist/
-=======
-dist/
-
-
->>>>>>> e973d90532466ed169011c769916cfc718b53043
