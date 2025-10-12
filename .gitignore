@@ -2,7 +2,6 @@
 .testenv.env
 .testenv/
 __pycache__/
-.gitignore
 tests\__pycache__/
 
 # Environment files
