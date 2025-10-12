@@ -5,8 +5,9 @@ import logging
 from app.channels.providers import email as email_client
 from app.data import supabase_repo as repo
 from app.policy.guards import evaluate_policy_guards
-from app.data.db import get_db
+from app.policy.guards_budget import evaluate_budget_caps
 from app.data.telemetry import log_decision_to_audit  # optional
+from app.data.db import get_pool  # your db helper in app/data/db.py
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 async def email_send(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Send an email through the configured Mandrill provider.
-    Enforces quiet hours, consent, and frequency caps before sending.
+    Enforces quiet hours, consent, frequency, and budget/rate caps before sending.
 
     payload example:
     {
@@ -24,19 +25,23 @@ async def email_send(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, A
         "to": "user@example.edu",
         "template": "welcome_template",
         "variables": {"first_name": "Alex"},
-        "subject": "Welcome to Admissions!"
+        "subject": "Welcome to Admissions!",
+        "campaign_id": "CAMP123"
     }
     """
-    db = await get_db()
+    channel = "email"
     lead = payload.get("lead", {})
     org = payload.get("organization", {})
-    channel = "email"
+    campaign_id = payload.get("campaign_id")
 
-    # --- Policy Guard Check (C2.1) ---
+    # --- Acquire DB connection or pool -------------------------------------
+    db = await get_pool()
+
+    # --- Policy Guard Check (C2.1: quiet/consent/frequency) -----------------
     allowed, reason = await evaluate_policy_guards(db, lead, org, channel)
     if not allowed:
         logger.info(
-            "SendBlocked",
+            "SendBlockedPolicy",
             extra={
                 "enrollment_id": enrollment_id,
                 "lead_id": lead.get("id"),
@@ -50,21 +55,59 @@ async def email_send(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, A
             "enrollment_id": enrollment_id,
             "status": "blocked",
             "reason": reason,
+            "stage": "policy_guard",
             "request": payload,
         }
 
-    # --- Provider Send ---
+    # --- Budget / Rate Cap Check (C2.2) ------------------------------------
+    allowed, reason, hint = await evaluate_budget_caps(
+        db=db,
+        campaign_id=campaign_id,
+        channel=channel,
+        policy=org.get("policy", {}),
+    )
+    if not allowed:
+        logger.info(
+            "SendBlockedBudget",
+            extra={
+                "enrollment_id": enrollment_id,
+                "campaign_id": campaign_id,
+                "channel": channel,
+                "reason": reason,
+                "hint": hint,
+            },
+        )
+        await log_decision_to_audit(lead.get("id"), channel, reason)
+        return {
+            "channel": channel,
+            "enrollment_id": enrollment_id,
+            "campaign_id": campaign_id,
+            "status": "blocked",
+            "reason": reason,
+            "hint": hint,
+            "stage": "budget_guard",
+            "request": payload,
+        }
+
+    # --- Provider Send ------------------------------------------------------
     try:
         ref = await email_client.send_email(
             to_email=payload["to"],
-            template_name=payload["template"],
+            subject=payload.get("subject"),
+            template_name=payload.get("template"),
             variables=payload.get("variables", {}),
         )
-        await repo.log_outbound(
-            enrollment_id=enrollment_id,
-            channel=channel,
-            provider_ref=ref,
-        )
+
+        # Optional: record outbound for telemetry/audit
+        try:
+            await repo.log_outbound(
+                enrollment_id=enrollment_id,
+                channel=channel,
+                provider_ref=ref,
+            )
+        except Exception as log_ex:
+            logger.warning("OutboundLogFailed", extra={"error": str(log_ex)})
+
         logger.info(
             "EmailDispatched",
             extra={

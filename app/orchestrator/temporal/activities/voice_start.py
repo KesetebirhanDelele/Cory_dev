@@ -5,8 +5,9 @@ import logging
 from app.channels.providers import voice as voice_client
 from app.data import supabase_repo as repo
 from app.policy.guards import evaluate_policy_guards
-from app.data.db import get_db
+from app.policy.guards_budget import evaluate_budget_caps
 from app.data.telemetry import log_decision_to_audit
+from app.data.db import get_pool  # consistent with other activities
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 async def voice_start(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Start an outbound Synthflow call (voice channel).
-    Applies quiet hours, consent, and frequency cap rules pre-send.
+    Applies quiet hours, consent, frequency, and budget/rate caps pre-send.
 
     payload example:
     {
@@ -23,19 +24,23 @@ async def voice_start(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, 
         "organization": {...},
         "to": "+15551234567",
         "agent_id": "voice_agent_001",
-        "context": {"program": "nursing"}
+        "context": {"program": "nursing"},
+        "campaign_id": "CAMP123"
     }
     """
-    db = await get_db()
+    channel = "voice"
     lead = payload.get("lead", {})
     org = payload.get("organization", {})
-    channel = "voice"
+    campaign_id = payload.get("campaign_id")
 
-    # --- Policy Guard Check (C2.1) ---
+    # --- Acquire DB connection ---------------------------------------------
+    db = await get_pool()
+
+    # --- Policy Guard Check (C2.1) -----------------------------------------
     allowed, reason = await evaluate_policy_guards(db, lead, org, channel)
     if not allowed:
         logger.info(
-            "SendBlocked",
+            "SendBlockedPolicy",
             extra={
                 "enrollment_id": enrollment_id,
                 "lead_id": lead.get("id"),
@@ -49,21 +54,58 @@ async def voice_start(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, 
             "enrollment_id": enrollment_id,
             "status": "blocked",
             "reason": reason,
+            "stage": "policy_guard",
             "request": payload,
         }
 
-    # --- Provider Send ---
+    # --- Budget / Rate Cap Check (C2.2) ------------------------------------
+    allowed, reason, hint = await evaluate_budget_caps(
+        db=db,
+        campaign_id=campaign_id,
+        channel=channel,
+        policy=org.get("policy", {}),
+    )
+    if not allowed:
+        logger.info(
+            "SendBlockedBudget",
+            extra={
+                "enrollment_id": enrollment_id,
+                "campaign_id": campaign_id,
+                "channel": channel,
+                "reason": reason,
+                "hint": hint,
+            },
+        )
+        await log_decision_to_audit(lead.get("id"), channel, reason)
+        return {
+            "channel": channel,
+            "enrollment_id": enrollment_id,
+            "campaign_id": campaign_id,
+            "status": "blocked",
+            "reason": reason,
+            "hint": hint,
+            "stage": "budget_guard",
+            "request": payload,
+        }
+
+    # --- Provider Send ------------------------------------------------------
     try:
         ref = await voice_client.start_call(
             to=payload["to"],
             agent_id=payload["agent_id"],
             context=payload.get("context", {}),
         )
-        await repo.log_outbound(
-            enrollment_id=enrollment_id,
-            channel=channel,
-            provider_ref=ref,
-        )
+
+        # Optional: log outbound call for telemetry/audit
+        try:
+            await repo.log_outbound(
+                enrollment_id=enrollment_id,
+                channel=channel,
+                provider_ref=ref,
+            )
+        except Exception as log_ex:
+            logger.warning("OutboundLogFailed", extra={"error": str(log_ex)})
+
         logger.info(
             "VoiceDispatched",
             extra={
