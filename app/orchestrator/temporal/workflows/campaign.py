@@ -1,18 +1,20 @@
 ﻿# app/orchestrator/temporal/workflows/campaign.py
 from __future__ import annotations
+
 import os
-from typing import Dict, Any, Optional
 from datetime import timedelta
+from typing import Any, Dict, Optional, Tuple
+
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
+from app.policy.guards import pre_send_decision
 from app.orchestrator.temporal.common.provider_event import ProviderEvent
-from app.policy.guards import pre_send_decision  # <- guards
-
-from typing import Tuple
 from app.orchestrator.temporal.common.instruction import Instruction
 from app.orchestrator.temporal.common.attempts import Attempt, AwaitSpec
+from app.orchestrator.temporal.common.retry_policies import activity_options_for
 
-# Feature flag: OFF by default (so existing tests remain green)
+# Feature flag: OFF by default (so existing tests remain green without policy checks)
 ENABLE_GUARDS = os.getenv("ENABLE_GUARDS", "0") == "1"
 
 # Import activities inside unsafe block so Temporal can resolve them in tests
@@ -38,7 +40,8 @@ class CampaignWorkflow:
     @workflow.signal
     def provider_event(self, event: Dict[str, Any] | ProviderEvent) -> None:
         """
-        Signal payload example:
+        Signal payload (validated against ProviderEvent):
+
           {
             "status": "delivered" | "failed" | "replied" | "completed" | "bounced" | "queued",
             "provider_ref": "stub-sms-enr_42",
@@ -62,29 +65,38 @@ class CampaignWorkflow:
             "await_timeout_seconds": int (optional, default 20),
 
             # Optional (used only when ENABLE_GUARDS=1)
-            "policy": {...},          # campaign policy subset (quiet_hours, min_gap_minutes, dnc_labels, timezone_field, etc.)
-            "enrollment": {...},      # e.g., {"timezone": "America/Chicago", "labels": ["dnc"]}
+            "policy": {...},          # e.g., quiet_hours/min_gap/dnc settings
+            "enrollment": {...},      # e.g., {"timezone": "America/Chicago", "labels": ["dnc"], "consent": true}
             "step": {...},            # e.g., {"channel": "sms"}
-            "context": {...},         # e.g., {"last_sent_at": "...", "now": datetime-iso}
+            "context": {...},         # e.g., {"last_sent_at": "...", "now": "...", "sent_count_last_24h": 0}
           }
+
         Returns:
           {
             "attempt": {...activity_result} | None,
             "final": {...signal_payload} | {"status": "timeout" | "guard_block", ...}
           }
         """
-        action = instruction.get("action")
-        payload = instruction.get("payload", {})
+        action = (instruction or {}).get("action")
+        payload = (instruction or {}).get("payload", {})
 
         # ---- Guard check (behind feature flag) -------------------------------
         if ENABLE_GUARDS:
             enrollment = instruction.get("enrollment") or {}
-            step = instruction.get("step") or {"channel": ("sms" if action == "send_sms"
-                                                           else "email" if action == "send_email"
-                                                           else "voice")}
+            step = instruction.get("step") or {
+                "channel": ("sms" if action == "send_sms"
+                            else "email" if action == "send_email"
+                            else "voice")
+            }
             policy = instruction.get("policy") or {}
             context = instruction.get("context") or {}
-            verdict = pre_send_decision(enrollment=enrollment, step=step, policy=policy, context=context)
+
+            verdict = pre_send_decision(
+                enrollment=enrollment,
+                step=step,
+                policy=policy,
+                context=context,
+            )
             if not verdict.get("allow", True):
                 # Skip sending; return a clear structured outcome
                 return {
@@ -96,24 +108,32 @@ class CampaignWorkflow:
                     },
                 }
 
-        # ---- Execute the requested activity ---------------------------------
+        # ---- Execute the requested activity (with retry policy) -------------
+        # Centralized options per channel (timeouts, backoff, non-retryables)
+        attempt: Dict[str, Any]
         if action == "send_sms":
+            opts, rp = activity_options_for("sms")
             attempt = await workflow.execute_activity(
                 sms_send,
                 args=[enrollment_id, payload],
-                start_to_close_timeout=timedelta(seconds=30),  # keep generous S2C for network variance
+                retry_policy=rp,
+                **opts,
             )
         elif action == "send_email":
+            opts, rp = activity_options_for("email")
             attempt = await workflow.execute_activity(
                 email_send,
                 args=[enrollment_id, payload],
-                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=rp,
+                **opts,
             )
         elif action == "voice_start":
+            opts, rp = activity_options_for("voice")
             attempt = await workflow.execute_activity(
                 voice_start,
                 args=[enrollment_id, payload],
-                start_to_close_timeout=timedelta(seconds=60),
+                retry_policy=rp,
+                **opts,
             )
         else:
             raise ValueError(f"Unsupported action: {action}")
@@ -136,7 +156,10 @@ class CampaignWorkflow:
         }
         return {"attempt": attempt, "final": final}
 
-# app/orchestrator/temporal/workflows/campaign.py  (APPEND THESE LINES)
+
+# ---------------------------
+# Deterministic planner (C1.1)
+# ---------------------------
 
 def plan_single_step(instruction: Instruction, state: dict | None = None) -> Tuple[Attempt, AwaitSpec]:
     """
@@ -145,14 +168,13 @@ def plan_single_step(instruction: Instruction, state: dict | None = None) -> Tup
       - Declares what provider_event we will await next (AwaitSpec)
     No side effects; no randomness; depends only on arguments.
     """
-    state = state or {}
+    _ = state or {}
 
     # Map semantic action → expected provider event (deterministic defaults)
-    # You can extend this table as you add actions/channels.
     expected_event = {
         "SendSMS": "delivered",
         "SendEmail": "delivered",
-        "StartCall": "delivered",  # success path means contact answered & completed
+        "StartCall": "delivered",  # success path implies call completed
     }.get(instruction.action, "delivered")
 
     attempt = Attempt(action=instruction.action, params=instruction.payload)
