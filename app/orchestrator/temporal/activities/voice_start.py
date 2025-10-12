@@ -1,26 +1,100 @@
-﻿# from temporalio import activity
-# from app.channels.providers import voice as voice_client
-# from app.data import supabase_repo as repo
-
-# @activity.defn
-# async def run(enrollment_id: str, payload: dict) -> dict:
-#     """payload: {'to': str, 'script_id': str, 'idempotency_key': str?}"""
-#     ref = await voice_client.start_call(to=payload["to"], script_id=payload.get("script_id"), idempotency_key=payload.get("idempotency_key"))
-#     try:
-#         await repo.log_outbound(enrollment_id=enrollment_id, channel="voice", provider_ref=ref)
-#     except Exception:
-#         pass
-#     return {"provider_ref": ref}
-
-from temporalio import activity
+﻿from temporalio import activity
 from typing import Dict, Any
+import logging
+
+from app.channels.providers import voice as voice_client
+from app.data import supabase_repo as repo
+from app.policy.guards import evaluate_policy_guards
+from app.data.db import get_db
+from app.data.telemetry import log_decision_to_audit
+
+logger = logging.getLogger(__name__)
+
 
 @activity.defn(name="voice_start")
 async def voice_start(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "channel": "voice",
-        "enrollment_id": enrollment_id,
-        "provider_ref": f"stub-voice-{enrollment_id}",
-        "status": "queued",
-        "request": payload,
+    """
+    Start an outbound Synthflow call (voice channel).
+    Applies quiet hours, consent, and frequency cap rules pre-send.
+
+    payload example:
+    {
+        "lead": {...},
+        "organization": {...},
+        "to": "+15551234567",
+        "agent_id": "voice_agent_001",
+        "context": {"program": "nursing"}
     }
+    """
+    db = await get_db()
+    lead = payload.get("lead", {})
+    org = payload.get("organization", {})
+    channel = "voice"
+
+    # --- Policy Guard Check (C2.1) ---
+    allowed, reason = await evaluate_policy_guards(db, lead, org, channel)
+    if not allowed:
+        logger.info(
+            "SendBlocked",
+            extra={
+                "enrollment_id": enrollment_id,
+                "lead_id": lead.get("id"),
+                "channel": channel,
+                "reason": reason,
+            },
+        )
+        await log_decision_to_audit(lead.get("id"), channel, reason)
+        return {
+            "channel": channel,
+            "enrollment_id": enrollment_id,
+            "status": "blocked",
+            "reason": reason,
+            "request": payload,
+        }
+
+    # --- Provider Send ---
+    try:
+        ref = await voice_client.start_call(
+            to=payload["to"],
+            agent_id=payload["agent_id"],
+            context=payload.get("context", {}),
+        )
+        await repo.log_outbound(
+            enrollment_id=enrollment_id,
+            channel=channel,
+            provider_ref=ref,
+        )
+        logger.info(
+            "VoiceDispatched",
+            extra={
+                "enrollment_id": enrollment_id,
+                "lead_id": lead.get("id"),
+                "provider_ref": ref,
+                "status": "sent",
+            },
+        )
+        return {
+            "channel": channel,
+            "enrollment_id": enrollment_id,
+            "provider_ref": ref,
+            "status": "sent",
+            "request": payload,
+        }
+
+    except Exception as e:
+        logger.error(
+            "VoiceError",
+            extra={
+                "enrollment_id": enrollment_id,
+                "lead_id": lead.get("id"),
+                "error": str(e),
+            },
+            exc_info=True,
+        )
+        return {
+            "channel": channel,
+            "enrollment_id": enrollment_id,
+            "status": "failed",
+            "error": str(e),
+            "request": payload,
+        }

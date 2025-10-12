@@ -14,6 +14,7 @@ app
 app\__init__.py
 app\agents
 app\agents\__init__.py
+app\agents\agent_catalog.py
 app\agents\call_processing_agent.py
 app\agents\campaign_builder.py
 app\agents\enroll_agent.py
@@ -55,8 +56,13 @@ app\orchestrator\temporal\activities\sms_send.py
 app\orchestrator\temporal\activities\voice_start.py
 app\orchestrator\temporal\common
 app\orchestrator\temporal\common\__init__.py
+app\orchestrator\temporal\common\attempts.py
+app\orchestrator\temporal\common\errors.py
+app\orchestrator\temporal\common\instruction.py
+app\orchestrator\temporal\common\provider_event.py
 app\orchestrator\temporal\common\retry_policies.py
 app\orchestrator\temporal\schedules.py
+app\orchestrator\temporal\signal_bridge.py
 app\orchestrator\temporal\temporal_build_plan.md
 app\orchestrator\temporal\worker.py
 app\orchestrator\temporal\workflows
@@ -87,6 +93,11 @@ diagram\langgraph-role.dot
 diagram\langgraph-role.svg
 diagram\n8n-role.dot
 diagram\n8n-role.svg
+docs
+docs\agent_catalog.md
+docs\error_taxonomy.md
+docs\signal_contract.md
+docs\state_snapshot_mapping.md
 pytest.ini
 README.md
 repo_structure.ps1
@@ -97,6 +108,7 @@ seeding
 seeding\__init__.py
 seeding\1.unique_indexes.sql
 seeding\2.seed_organization.sql
+seeding\B2.2 SEED.sql
 seeding\seed_minimal.py
 sql
 sql tests
@@ -107,6 +119,7 @@ sql\inventory_SQL_pack.sql
 sql\migrations
 sql\migrations\001_core_schema.sql
 sql\migrations\0012_b2_1_telemetry_view.sql
+sql\migrations\0013_b2_2_state_snapshot.sql
 sql\migrations\002_rls_roles.sql
 sql\migrations\README.MD
 sql\seed_all.sql
@@ -115,9 +128,15 @@ system-flow.svg
 tests
 tests\__init__.py
 tests\conftest.py
+tests\docs
+tests\docs\test_agent_catalog.py
 tests\fake_providers.py
 tests\integration
+tests\integration\test_activity_retries.py
 tests\integration\test_campaign_workflow.py
+tests\integration\test_campaign_workflow2.py
+tests\integration\test_snapshot_slo.py
+tests\integration\test_webhook_to_signal.py
 tests\sql
 tests\sql\test_rls.py
 tests\sql\test_schema.py
