@@ -6,8 +6,16 @@ import asyncio
 from app.web.middleware import setup_middleware
 from app.web.webhook import router as webhook_router
 from app.web.idempotency_cache import IdempotencyCache
+from app.web.sms_webhook import router as sms_router
+from app.web.email_webhook import router as email_router
+from app.web.voice_webhook import router as voice_router
+from app.web.wa_webhook import router as wa_router
 
 app = FastAPI(title="Cory Admissions API")
+app.include_router(sms_router)
+app.include_router(email_router)
+app.include_router(voice_router)
+app.include_router(wa_router)
 
 # ✅ Initialize idempotency cache and stub functions
 idempotency_cache = IdempotencyCache(ttl_seconds=300)
