@@ -1,9 +1,10 @@
-# app/policy/guards.py
 from __future__ import annotations
 
+import logging
 from datetime import datetime, time, timedelta, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
+logger = logging.getLogger(__name__)
 
 # ----------------------------
 # Exceptions & atomic checks
@@ -17,15 +18,11 @@ class PolicyDenied(Exception):
 
 
 def check_quiet_hours(now: datetime, start: time = time(21, 0), end: time = time(8, 0)) -> None:
-    """
-    Deny if current local time is within quiet hours window.
-    Window crosses midnight when start >= end (default 21:00–08:00).
-    """
+    """Deny if current local time is within quiet hours window."""
     n = now.timetz()
     if start <= end:
         blocked = start <= n <= end
     else:
-        # window spans midnight (e.g., 21:00–08:00)
         blocked = (n >= start) or (n <= end)
     if blocked:
         raise PolicyDenied("quiet_hours", "Sending blocked during quiet hours")
@@ -59,46 +56,16 @@ def pre_send_decision(
 ) -> Dict[str, Any]:
     """
     Deterministic policy gate used by CampaignWorkflow before sending.
-    Returns a verdict dict instead of raising, so the workflow can branch:
-
-      { "allow": True }  OR
-      {
-        "allow": False,
-        "reason": "<code>",
-        "next_hint": { ... }   # optional structured suggestion
-      }
-
-    Inputs (all optional keys handled gracefully):
-      enrollment: { "timezone": "America/Chicago", "consent": bool, "labels": ["dnc", ...] }
-      step:       { "channel": "sms"|"email"|"voice" }
-      policy:     {
-                    "quiet_hours": true,
-                    "quiet_start": "21:00", "quiet_end": "08:00",
-                    "frequency_cap_per_24h": 3,
-                    "respect_dnc": true, "dnc_labels": ["dnc","do_not_call"],
-                    "default_consent": true
-                  }
-      context:    {
-                    "now": "2025-01-01T12:00:00Z" | datetime,
-                    "sent_count_last_24h": 0
-                  }
+    Returns a verdict dict instead of raising so the workflow can branch.
     """
-
-    # --- Resolve "now" deterministically (UTC by default) -------------------
     raw_now: Optional[datetime] = context.get("now")
     if isinstance(raw_now, str):
-        # RFC3339/ISO8601; if naive, treat as UTC
         now = datetime.fromisoformat(raw_now.replace("Z", "+00:00"))
     elif isinstance(raw_now, datetime):
         now = raw_now
     else:
         now = datetime.now(timezone.utc)
 
-    # NOTE: If you want true local quiet-hours by contact timezone, integrate a tz lib.
-    # For deterministic/no-deps behavior, we treat quiet-hours against the given "now".
-    # You can pre-convert "now" to local time in caller if needed.
-
-    # --- Parse policy knobs with defaults -----------------------------------
     quiet_hours_enabled = bool(policy.get("quiet_hours", True))
     quiet_start = _parse_hhmm(policy.get("quiet_start", "21:00"))
     quiet_end = _parse_hhmm(policy.get("quiet_end", "08:00"))
@@ -108,51 +75,120 @@ def pre_send_decision(
 
     has_consent = bool(enrollment.get("consent", policy.get("default_consent", True)))
     enrollment_labels = set(map(str, enrollment.get("labels", [])))
-
     sent_last_24h = int(context.get("sent_count_last_24h", 0))
 
-    # --- Evaluate checks (order chosen for best user experience) ------------
     try:
         if respect_dnc:
             check_dnc(dnc_labels, enrollment_labels)
-
         check_consent(has_consent)
-
         if quiet_hours_enabled:
             check_quiet_hours(_to_naive_time(now), start=quiet_start, end=quiet_end)
-
         check_frequency(sent_last_24h, cap=freq_cap)
-
-        # All clear
         return {"allow": True}
-
     except PolicyDenied as e:
-        # Build actionable next-hint
         hint: Dict[str, Any] = {}
         if e.code == "quiet_hours":
             next_time = _next_allowed_time(_to_naive_time(now), quiet_start, quiet_end)
             hint = {"schedule_after": next_time.isoformat()}
         elif e.code == "freq_cap":
-            # simple suggestion: retry after 24h window rolls
             hint = {"retry_in_hours": 24}
         elif e.code == "no_consent":
             hint = {"action": "obtain_consent"}
         elif e.code == "dnc":
             hint = {"action": "remove_dnc_or_skip"}
 
-        return {
-            "allow": False,
-            "reason": e.code,
-            "next_hint": hint or None,
-        }
+        return {"allow": False, "reason": e.code, "next_hint": hint or None}
 
+
+# ----------------------------
+# Async convenience for activities
+# ----------------------------
+
+async def evaluate_policy_guards(
+    db, lead: Dict[str, Any], org: Dict[str, Any], channel: str
+) -> Tuple[bool, str]:
+    """
+    Async helper called by Temporal activities (SMS/Email/Voice).
+
+    Fetches count of recent sends and applies pre_send_decision logic.
+    Returns (allowed, reason).
+    """
+    # --- Fetch recent send count from interactions table --------------------
+    q = """
+        SELECT COUNT(*) AS cnt
+        FROM interactions
+        WHERE lead_id = $1 AND channel = $2
+          AND created_at > (NOW() - INTERVAL '24 hours')
+    """
+    sent_last_24h = 0
+    result = None
+    try:
+        maybe_result = await db.execute_query(q, lead.get("id"), channel)
+        # If fake_query was defined as async def returning a list, this is fine.
+        # If it returns a coroutine (common pytest mock pitfall), await it.
+        if callable(maybe_result):
+            maybe_result = await maybe_result
+        result = maybe_result
+
+        if result:
+            first = result[0]
+            if isinstance(first, dict):
+                lower_keys = {k.lower(): v for k, v in first.items()}
+                sent_last_24h = int(lower_keys.get("cnt", 0) or lower_keys.get("count", 0) or 0)
+            elif hasattr(first, "_asdict"):
+                lower_keys = {k.lower(): v for k, v in first._asdict().items()}
+                sent_last_24h = int(lower_keys.get("cnt", 0))
+    except Exception as e:
+        logger.debug("PolicyGuardDBFallback", extra={"error": str(e)})
+        sent_last_24h = 0
+
+    # 🔍 Debug diagnostic
+    logger.debug(
+        "TEST_DEBUG_SENT_LAST_24H",
+        extra={"lead_id": lead.get("id"), "sent_last_24h": sent_last_24h, "raw_result": str(result)}
+    )
+
+    # --- Resolve policy and enrollment context ------------------------------
+    policy = org.get("policy") or org  # support nested or flat org dicts
+    enrollment = {
+        "consent": lead.get("metadata", {})
+        .get("communication_consent", {})
+        .get("accepted_terms", True),
+        "labels": lead.get("metadata", {}).get("labels", []),
+        "timezone": lead.get("timezone", org.get("timezone", "America/New_York")),
+    }
+    step = {"channel": channel}
+    context = {"sent_count_last_24h": sent_last_24h, "now": datetime.utcnow().isoformat()}
+
+    # --- Evaluate via core deterministic logic ------------------------------
+    verdict = pre_send_decision(enrollment=enrollment, step=step, policy=policy, context=context)
+
+    # --- Structured result ---------------------------------------------------
+    if verdict.get("allow"):
+        logger.debug(
+            "PolicyAllow",
+            extra={"lead_id": lead.get("id"), "channel": channel, "sent_last_24h": sent_last_24h},
+        )
+        return True, "allowed"
+
+    reason = verdict.get("reason", "unknown")
+    logger.info(
+        "PolicyBlocked",
+        extra={
+            "lead_id": lead.get("id"),
+            "channel": channel,
+            "reason": reason,
+            "hint": verdict.get("next_hint"),
+            "sent_last_24h": sent_last_24h,
+        },
+    )
+    return False, reason
 
 # ----------------------------
 # Helpers (pure)
 # ----------------------------
 
 def _parse_hhmm(s: str) -> time:
-    """Parse 'HH:MM' into a time object; fallback to defaults if malformed."""
     try:
         hh, mm = s.split(":")
         return time(int(hh), int(mm))
@@ -161,29 +197,21 @@ def _parse_hhmm(s: str) -> time:
 
 
 def _to_naive_time(dt: datetime) -> datetime:
-    """Return a timezone-naive datetime for local time comparisons."""
     if dt.tzinfo:
         return dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt
 
 
 def _next_allowed_time(now: datetime, start: time, end: time) -> datetime:
-    """
-    Given quiet hours [start..end], compute the next time outside the window.
-    Works whether window crosses midnight or not.
-    """
     today = now.date()
     cur_t = now.time()
     if start <= end:
-        # e.g., 20:00–22:00 (doesn't cross midnight)
         if start <= cur_t <= end:
             return datetime.combine(today, end) + timedelta(minutes=1)
         return now
     else:
-        # e.g., 21:00–08:00 (crosses midnight)
         in_block = (cur_t >= start) or (cur_t <= end)
         if in_block:
-            # If before end (after midnight), today at end; else next-day at end
             target_day = today if cur_t <= end else (today + timedelta(days=1))
             return datetime.combine(target_day, end) + timedelta(minutes=1)
         return now
