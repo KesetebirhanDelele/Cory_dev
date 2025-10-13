@@ -4,7 +4,10 @@ from app.web.middleware import RequestIDMiddleware, LoggingMiddleware
 from app.web.webhook import router as webhook_router
 from app.orchestrator.temporal.signal_bridge import app as signal_app  # <— add
 
+from app.web.routes_handoffs import router as handoffs_router
+
 app = FastAPI(title="Cory API")
+app.include_router(handoffs_router)
 app.include_router(webhook_router)
 app.mount("", signal_app)  # exposes POST /temporal/signal
 
