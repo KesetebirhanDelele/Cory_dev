@@ -7,7 +7,7 @@ from app.data import supabase_repo as repo
 from app.policy.guards import evaluate_policy_guards
 from app.policy.guards_budget import evaluate_budget_caps
 from app.data.telemetry import log_decision_to_audit
-from app.data.db import get_pool  # consistent with other activities
+from app.data.db import supabase  # consistent with other activities
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def voice_start(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, 
     campaign_id = payload.get("campaign_id")
 
     # --- Acquire DB connection ---------------------------------------------
-    db = await get_pool()
+    db = supabase
 
     # --- Policy Guard Check (C2.1) -----------------------------------------
     allowed, reason = await evaluate_policy_guards(db, lead, org, channel)
