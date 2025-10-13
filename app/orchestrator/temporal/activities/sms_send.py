@@ -7,7 +7,7 @@ from app.data import supabase_repo as repo
 from app.policy.guards import evaluate_policy_guards
 from app.policy.guards_budget import evaluate_budget_caps
 from app.data.telemetry import log_decision_to_audit  # optional audit hook
-from app.data.db import get_pool  # preferred asyncpg accessor
+from app.data.db import supabase  # preferred asyncpg accessor
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def sms_send(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, Any
     campaign_id = payload.get("campaign_id")
 
     # --- Acquire DB connection or pool -------------------------------------
-    db = await get_pool()
+    db = supabase
 
     # --- Policy Guard Check (C2.1) -----------------------------------------
     allowed, reason = await evaluate_policy_guards(db, lead, org, channel)

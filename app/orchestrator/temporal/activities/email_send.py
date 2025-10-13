@@ -7,7 +7,7 @@ from app.data import supabase_repo as repo
 from app.policy.guards import evaluate_policy_guards
 from app.policy.guards_budget import evaluate_budget_caps
 from app.data.telemetry import log_decision_to_audit  # optional
-from app.data.db import get_pool  # your db helper in app/data/db.py
+from app.data.db import supabase  # your db helper in app/data/db.py
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ async def email_send(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, A
     campaign_id = payload.get("campaign_id")
 
     # --- Acquire DB connection or pool -------------------------------------
-    db = await get_pool()
+    db = supabase
 
     # --- Policy Guard Check (C2.1: quiet/consent/frequency) -----------------
     allowed, reason = await evaluate_policy_guards(db, lead, org, channel)
