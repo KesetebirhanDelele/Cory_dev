@@ -1,15 +1,14 @@
-# db.py — Supabase version (replaces asyncpg)
+# db.py — Supabase REST API version (public schema)
 from supabase import create_client, Client
 from typing import Any, Dict, List
 import os
 from dotenv import load_dotenv
 
-# Load .env variables
+# Load environment variables
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-SCHEMA = os.getenv("SUPABASE_SCHEMA", "dev_nexus")
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     raise ValueError("❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env")
@@ -22,9 +21,9 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 def fetch_due_actions() -> List[Dict[str, Any]]:
     """
     Reads from a view that lists enrollments whose next action is due.
-    (You must have 'v_due_actions' defined in your schema)
+    Requires a *public* view named 'v_due_actions' in your database.
     """
-    response = supabase.table(f"{SCHEMA}_v_due_actions").select("*").execute()
+    response = supabase.table("v_due_actions").select("*").execute()
     return response.data or []
 
 
@@ -34,8 +33,8 @@ def fetch_due_sms() -> List[Dict[str, Any]]:
     Equivalent to the asyncpg query you had before.
     """
     response = (
-        supabase.table(f"{SCHEMA}_campaign_activity")
-        .select("id, org_id, enrollment_id, generated_message")
+        supabase.table("campaign_activity")
+        .select("id, enrollment_id, generated_message, scheduled_at, channel, status")
         .eq("channel", "sms")
         .eq("status", "planned")
         .lte("scheduled_at", "now()")
@@ -52,19 +51,19 @@ def insert_activity(activity: Dict[str, Any]) -> Dict[str, Any]:
     Insert a new activity into campaign_activity.
     Returns inserted record with ID.
     """
-    response = supabase.table(f"{SCHEMA}_campaign_activity").insert(activity).execute()
+    response = supabase.table("campaign_activity").insert(activity).execute()
     if not response.data:
-        raise RuntimeError("Insert failed")
+        raise RuntimeError(f"Insert failed: {response}")
     return response.data[0]
 
 
 def update_activity(activity_id: int, patch: Dict[str, Any]) -> None:
     """
-    Update activity record by ID.
+    Update an existing activity record by ID.
     """
     if not patch:
         return
-    supabase.table(f"{SCHEMA}_campaign_activity").update(patch).eq("id", activity_id).execute()
+    supabase.table("campaign_activity").update(patch).eq("id", activity_id).execute()
 
 
 def upsert_staging(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -72,12 +71,12 @@ def upsert_staging(row: Dict[str, Any]) -> Dict[str, Any]:
     Upsert into phone_call_logs_stg by call_id.
     """
     response = (
-        supabase.table(f"{SCHEMA}_phone_call_logs_stg")
+        supabase.table("phone_call_logs_stg")
         .upsert(row, on_conflict="call_id")
         .execute()
     )
     if not response.data:
-        raise RuntimeError("Upsert failed")
+        raise RuntimeError(f"Upsert failed: {response}")
     return response.data[0]
 
 
@@ -85,8 +84,12 @@ def upsert_staging(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def rpc_ingest_phone_logs(max_rows: int = 100) -> int:
     """
-    Calls a Postgres function via Supabase RPC.
-    SELECT dev_nexus.usp_ingestphonecalllogs(p_max_rows := $1);
+    Calls a Postgres function via Supabase RPC:
+      SELECT dev_nexus.usp_ingestphonecalllogs(p_max_rows := $1);
     """
     response = supabase.rpc("usp_ingestphonecalllogs", {"p_max_rows": max_rows}).execute()
-    return int(response.data or 0)
+    try:
+        return int(response.data or 0)
+    except (ValueError, TypeError):
+        print(f"⚠️ Unexpected RPC response: {response.data}")
+        return 0

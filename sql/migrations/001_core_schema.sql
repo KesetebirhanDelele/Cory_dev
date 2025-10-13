@@ -192,6 +192,13 @@ create table if not exists dev_nexus.campaign_activity (
   error_message    text,
   created_at       timestamptz not null default now()
 );
+
+-- migrations/2025_10_12_add_variant_id_to_activities.sql
+alter table dev_nexus.campaign_activity
+    add column if not exists variant_id uuid null;
+create index if not exists ix_campaign_activity_variant_id
+    on dev_nexus.campaign_activity (variant_id);
+
 create index if not exists ix_activity_due        on dev_nexus.campaign_activity(status, due_at);
 create index if not exists ix_activity_enrollment on dev_nexus.campaign_activity(enrollment_id, due_at);
 create index if not exists ix_activity_campaign   on dev_nexus.campaign_activity(campaign_id, status, due_at);
@@ -553,3 +560,38 @@ commit;
 
 -- NOTE: Expose the schema to REST in the dashboard (one-time setting):
 -- Studio → Project Settings → API → "Schemas exposed to the REST API" → add `dev_nexus`
+
+-- ========== Mirror Views in Public Schema for Dashboard ==========
+create or replace view public.v_due_actions as
+select * from dev_nexus.v_due_actions;
+
+create or replace view public.v_due_actions as
+select * from dev_nexus.v_due_actions;
+
+create or replace view public.phone_call_logs_stg as
+select * from dev_nexus.phone_call_logs_stg;
+
+create or replace view public.campaign_activity as
+select
+  a.id,
+  e.project_id              as org_id,            -- was e.org_id (doesn't exist)
+  a.enrollment_id,
+  a.campaign_id,
+  a.contact_id,
+  a.step_id,
+  a.channel,
+  a.status,
+  a.attempt_no,
+  a.due_at                 as scheduled_at,       -- alias for your code
+  a.started_at,
+  a.completed_at,
+  a.result_summary         as generated_message,  -- alias for your code
+  a.result_payload,
+  a.error_message,
+  a.created_at,
+  a.variant_id
+from dev_nexus.campaign_activity a
+join dev_nexus.enrollment e on e.id = a.enrollment_id;
+
+create or replace view public.v_variant_attribution as
+select * from dev_nexus.v_variant_attribution;
