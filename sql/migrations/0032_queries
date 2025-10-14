@@ -1,0 +1,243 @@
+begin;
+
+-- 0) Safety: ensure base view exists
+do $$
+begin
+  if to_regclass('dev_nexus.telemetry_view') is null then
+    raise exception 'dev_nexus.telemetry_view not found.';
+  end if;
+end $$;
+
+-- 1) Helper view: extract fields we need from JSON payload
+--    Adjust JSON paths to match your actual payload structure.
+create or replace view dev_nexus.telemetry_view_enriched as
+select
+  t.occurred_at,
+  t.event_pk,
+  t.event_kind,             -- 'message' | 'event'
+  t.project_id,
+  t.provider_id,
+  t.provider_ref,
+  t.direction,              -- 'outbound' / 'inbound' (from your base view)
+  t.payload,
+
+  /* Derive a normalized event_type:
+     - events: payload->>'type'
+     - messages: use payload->>'type' if present OR synthesize by channel+direction
+  */
+  coalesce(
+    case when t.event_kind = 'event'
+         then t.payload->>'type' end,
+    case when t.event_kind = 'message'
+         then t.payload->>'type' end,
+    -- fallback (example): outbound email → 'send_email'
+    case
+      when t.event_kind='message' and (t.payload->>'channel') in ('email','sms','voice')
+           and t.direction='outbound'
+        then 'send_' || (t.payload->>'channel')
+      when t.event_kind='message' and (t.payload->>'channel') in ('email','sms','voice')
+           and t.direction='inbound'
+        then 'inbound_' || (t.payload->>'channel')
+      else null
+    end
+  ) as event_type,
+
+  /* Channel from message payload or event payload */
+  coalesce(
+    t.payload->>'channel',
+    t.payload->'data'->>'channel'
+  ) as channel,
+
+  /* Optional experiment identifiers if present */
+  coalesce(
+    t.payload->>'variant_id',
+    t.payload->'data'->>'variant_id'
+  ) as variant_id,
+
+  /* A thread/interaction key (choose what you have available) */
+  coalesce(
+    t.payload->>'interaction_id',
+    t.payload->'data'->>'interaction_id',
+    -- as a last resort, provider_ref can serve as a correlation key
+    t.provider_ref
+  ) as interaction_id
+
+from dev_nexus.telemetry_view t;
+
+comment on view dev_nexus.telemetry_view_enriched
+  is 'Telemetry with normalized event_type, channel, variant_id, interaction_id extracted from payload.';
+
+-- 2) KPI: pipeline stages (send -> webhook -> state), then p95s
+create or replace view dev_nexus.kpi_interaction_stages as
+with s as (
+  select interaction_id, min(occurred_at) as send_at
+  from dev_nexus.telemetry_view_enriched
+  where event_type in ('send_email','send_sms','send_voice')
+  group by interaction_id
+),
+w as (
+  select interaction_id, min(occurred_at) as webhook_at
+  from dev_nexus.telemetry_view_enriched
+  where event_type = 'webhook_received'
+  group by interaction_id
+),
+u as (
+  select interaction_id, min(occurred_at) as state_at
+  from dev_nexus.telemetry_view_enriched
+  where event_type = 'state_updated'
+  group by interaction_id
+)
+select
+  s.interaction_id,
+  s.send_at,
+  w.webhook_at,
+  u.state_at,
+  extract(epoch from (w.webhook_at - s.send_at)) * 1000 as ms_send_to_webhook,
+  extract(epoch from (u.state_at - w.webhook_at)) * 1000 as ms_webhook_to_state,
+  extract(epoch from (u.state_at - s.send_at)) * 1000 as ms_send_to_state
+from s
+left join w using (interaction_id)
+left join u using (interaction_id);
+
+create or replace view dev_nexus.kpi_latency_p95 as
+select
+  percentile_disc(0.95) within group (order by ms_send_to_webhook) as p95_send_to_webhook_ms,
+  percentile_disc(0.95) within group (order by ms_webhook_to_state) as p95_webhook_to_state_ms,
+  percentile_disc(0.95) within group (order by ms_send_to_state)  as p95_end_to_end_ms
+from dev_nexus.kpi_interaction_stages
+where ms_send_to_state is not null;
+
+-- 3) KPI: deliverability by channel
+create or replace view dev_nexus.kpi_deliverability_by_channel as
+with base as (
+  select
+    channel,
+    interaction_id,
+    max( (event_type in ('delivered_email','sms_delivered','call_connected'))::int ) as delivered,
+    max( (event_type in ('bounce','undeliverable','delivery_failed'))::int )         as failed
+  from dev_nexus.telemetry_view_enriched
+  group by channel, interaction_id
+)
+select
+  channel,
+  count(*) as attempts,
+  sum(delivered) as delivered,
+  sum(failed) as failed,
+  round(100.0 * sum(delivered)::numeric / nullif(count(*),0), 2) as deliverability_pct
+from base
+group by channel
+order by channel;
+
+-- 4) KPI: response rate by variant
+create or replace view dev_nexus.kpi_response_by_variant as
+with sends as (
+  select variant_id, count(*) as sent
+  from dev_nexus.telemetry_view_enriched
+  where event_type in ('send_email','send_sms','send_voice')
+  group by variant_id
+),
+replies as (
+  select variant_id, count(distinct interaction_id) as responders
+  from dev_nexus.telemetry_view_enriched
+  where event_type in ('inbound_reply','call_connected_inbound')
+  group by variant_id
+)
+select
+  s.variant_id,
+  s.sent,
+  coalesce(r.responders, 0) as responders,
+  round(100.0 * coalesce(r.responders,0)::numeric / nullif(s.sent,0), 2) as response_rate_pct
+from sends s
+left join replies r using (variant_id)
+order by response_rate_pct desc nulls last;
+
+-- 5) RPC wrappers (Supabase) in dev_nexus schema
+create or replace function dev_nexus.rpc_kpi_latency_p95()
+returns setof dev_nexus.kpi_latency_p95
+language sql
+stable
+as $$ select * from dev_nexus.kpi_latency_p95 $$;
+
+create or replace function dev_nexus.rpc_kpi_deliverability()
+returns setof dev_nexus.kpi_deliverability_by_channel
+language sql
+stable
+as $$ select * from dev_nexus.kpi_deliverability_by_channel $$;
+
+create or replace function dev_nexus.rpc_kpi_response_by_variant()
+returns setof dev_nexus.kpi_response_by_variant
+language sql
+stable
+as $$ select * from dev_nexus.kpi_response_by_variant $$;
+
+-- 6) Grants to service role (match your RLS posture)
+revoke all on table dev_nexus.kpi_interaction_stages from public, anon, authenticated;
+revoke all on table dev_nexus.kpi_latency_p95 from public, anon, authenticated;
+revoke all on table dev_nexus.kpi_deliverability_by_channel from public, anon, authenticated;
+revoke all on table dev_nexus.kpi_response_by_variant from public, anon, authenticated;
+
+grant select on table dev_nexus.kpi_interaction_stages to service_role;
+grant select on table dev_nexus.kpi_latency_p95 to service_role;
+grant select on table dev_nexus.kpi_deliverability_by_channel to service_role;
+grant select on table dev_nexus.kpi_response_by_variant to service_role;
+
+revoke all on function dev_nexus.rpc_kpi_latency_p95() from public, anon, authenticated;
+revoke all on function dev_nexus.rpc_kpi_deliverability() from public, anon, authenticated;
+revoke all on function dev_nexus.rpc_kpi_response_by_variant() from public, anon, authenticated;
+
+grant execute on function dev_nexus.rpc_kpi_latency_p95() to service_role;
+grant execute on function dev_nexus.rpc_kpi_deliverability() to service_role;
+grant execute on function dev_nexus.rpc_kpi_response_by_variant() to service_role;
+
+commit;
+
+begin;
+
+create or replace function public.rpc_kpi_latency_p95()
+returns setof dev_nexus.kpi_latency_p95
+language sql stable
+as $$ select * from dev_nexus.kpi_latency_p95 $$;
+
+create or replace function public.rpc_kpi_deliverability()
+returns setof dev_nexus.kpi_deliverability_by_channel
+language sql stable
+as $$ select * from dev_nexus.kpi_deliverability_by_channel $$;
+
+create or replace function public.rpc_kpi_response_by_variant()
+returns setof dev_nexus.kpi_response_by_variant
+language sql stable
+as $$ select * from dev_nexus.kpi_response_by_variant $$;
+
+revoke all on function public.rpc_kpi_latency_p95() from public, anon, authenticated;
+revoke all on function public.rpc_kpi_deliverability() from public, anon, authenticated;
+revoke all on function public.rpc_kpi_response_by_variant() from public, anon, authenticated;
+
+grant execute on function public.rpc_kpi_latency_p95() to service_role;
+grant execute on function public.rpc_kpi_deliverability() to service_role;
+grant execute on function public.rpc_kpi_response_by_variant() to service_role;
+
+commit;
+
+
+-- Performance checks (run separately):
+EXPLAIN ANALYZE SELECT * FROM dev_nexus.kpi_latency_p95;
+EXPLAIN ANALYZE SELECT * FROM dev_nexus.kpi_deliverability_by_channel;
+EXPLAIN ANALYZE SELECT * FROM dev_nexus.kpi_response_by_variant;
+
+-- If any are slow on your sample:
+
+-- Ensure base tables behind dev_nexus.telemetry_view have these indexes:
+
+-- tailor to your real columns; these are typical
+CREATE INDEX IF NOT EXISTS idx_msg_proj_time ON dev_nexus.message (project_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_msg_ref_dir   ON dev_nexus.message (provider_ref, direction);
+
+CREATE INDEX IF NOT EXISTS idx_evt_proj_time ON dev_nexus.event (project_id, created_at, type);
+CREATE INDEX IF NOT EXISTS idx_evt_ref_type  ON dev_nexus.event (provider_ref, type);
+
+-- If needed, convert to materialized views and refresh periodically:
+
+CREATE MATERIALIZED VIEW dev_nexus.kpi_response_by_variant_mv AS
+SELECT * FROM dev_nexus.kpi_response_by_variant;
+CREATE INDEX ON dev_nexus.kpi_response_by_variant_mv (variant_id);
+-- refresh job later (n8n/cron): REFRESH MATERIALIZED VIEW CONCURRENTLY dev_nexus.kpi_response_by_variant_mv;
