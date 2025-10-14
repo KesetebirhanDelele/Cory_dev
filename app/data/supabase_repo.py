@@ -23,3 +23,21 @@ def rpc(name: str, payload: dict | None = None):
     # Map rate-limit/5xx to transient for retry (pseudo-check below; adapt to client’s error shape)
     # if res.status_code in (429, 500, 502, 503, 504): raise TransientError()
     return res.data
+####
+# app/data/supabase_repo.py
+
+import logging
+logger = logging.getLogger("cory.supabase")
+
+async def log_inbound(provider_ref: str, status: str, raw_payload: dict):
+    """
+    Store inbound webhook event details in Supabase table `inbound_events`.
+    For now, this is a stub (the integration test will monkeypatch it).
+    """
+    logger.info("Logging inbound event", extra={
+        "provider_ref": provider_ref,
+        "status": status
+    })
+    # In production, you would do:
+    # await supabase.table("inbound_events").insert({...})
+    return {"provider_ref": provider_ref, "status": status}
