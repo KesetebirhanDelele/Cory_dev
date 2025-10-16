@@ -1,21 +1,25 @@
 # app/web/routes_handoffs.py
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from uuid import UUID
-from app.repo.handoff_repo import HandoffRepo
 
+from app.repo.handoff_repo import HandoffRepo
 # If you already expose a DB pool dependency, import it instead:
 # from app.data.db_pg import get_pool  # <- preferred if available
 
 router = APIRouter(prefix="/api/v1/handoffs", tags=["handoffs"])
 
-# --- Minimal deps (adapt if you already have these in middleware/db modules) ---
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
 
 async def get_pool(request: Request):
     """
-    Matches common pattern in your app: store the asyncpg pool on app.state.db_pool.
-    If your project exposes a helper in app/data/db_pg.py, replace this with that import.
+    Fallback: read asyncpg pool from app.state.db_pool.
+    Prefer importing a central get_pool() if you have one.
     """
     pool = getattr(request.app.state, "db_pool", None)
     if not pool:
@@ -41,7 +45,9 @@ async def get_identity(request: Request) -> Identity:
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid auth identifiers")
 
-# --- Schemas (kept local so you don't have to edit app/web/schemas.py) ---
+# ---------------------------------------------------------------------------
+# Schemas
+# ---------------------------------------------------------------------------
 
 class HandoffCreateRequest(BaseModel):
     title: str = Field(..., min_length=3, max_length=200)
@@ -53,7 +59,7 @@ class HandoffCreateRequest(BaseModel):
     description: Optional[str] = None
     priority: str = Field("normal", pattern=r"^(low|normal|high|urgent)$")
     assigned_to: Optional[UUID] = None
-    metadata: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class ResolveRequest(BaseModel):
     resolution_note: Optional[str] = None
@@ -78,9 +84,11 @@ class HandoffResponse(BaseModel):
     outcome_snapshot: Dict[str, Any]
     metadata: Dict[str, Any]
 
-# --- Routes -------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
-@router.post("", response_model=HandoffResponse)
+@router.post("", response_model=HandoffResponse, status_code=201)
 async def create_handoff(
     body: HandoffCreateRequest,
     ident: Identity = Depends(get_identity),
@@ -112,7 +120,7 @@ async def resolve_handoff(
     pool = Depends(get_pool),
 ):
     repo = HandoffRepo(pool)
-    # Optional: record first response when resolver acts
+    # Optional: record first response timestamp when resolver acts
     await repo.mark_first_response(handoff_id=handoff_id)
     rec = await repo.resolve(
         handoff_id=handoff_id,
