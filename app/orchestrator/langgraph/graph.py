@@ -1,8 +1,9 @@
 # app/orchestrator/langgraph/graph.py
 from langgraph.graph import StateGraph, END
-from typing import TypedDict, Literal, List, Dict, Any
+from typing import TypedDict, List, Dict, Any
 import asyncio
 from app.data.db import fetch_due_actions
+from app.orchestrator.langgraph.nodes.instruction_node import make_instruction
 
 
 # ---------------------------
@@ -37,19 +38,30 @@ def route(job: Dict[str, Any]) -> str:
 
 
 async def sms_node(state: OrchestratorState) -> OrchestratorState:
-    """Placeholder for SMS dispatch or queuing logic."""
-    # Here, you’d call Temporal activity or enqueue into channel worker.
-    return state
+    """Produce a deterministic Instruction for SMS."""
+    if not state.get("jobs"):
+        return state
+    job = state["jobs"][0]
+    instr = make_instruction({**job, "channel": "sms"})
+    return {"jobs": [{"job": job, "instruction": instr.model_dump()}]}
 
 
 async def email_node(state: OrchestratorState) -> OrchestratorState:
-    """Placeholder for Email dispatch."""
-    return state
+    """Produce a deterministic Instruction for Email."""
+    if not state.get("jobs"):
+        return state
+    job = state["jobs"][0]
+    instr = make_instruction({**job, "channel": "email"})
+    return {"jobs": [{"job": job, "instruction": instr.model_dump()}]}
 
 
 async def voice_node(state: OrchestratorState) -> OrchestratorState:
-    """Placeholder for Voice call dispatch."""
-    return state
+    """Produce a deterministic Instruction for Voice."""
+    if not state.get("jobs"):
+        return state
+    job = state["jobs"][0]
+    instr = make_instruction({**job, "channel": "voice"})
+    return {"jobs": [{"job": job, "instruction": instr.model_dump()}]}
 
 
 # ---------------------------
