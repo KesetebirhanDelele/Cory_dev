@@ -45,5 +45,3 @@ tests/.pytest_cache/
 *.egg-info/
 build/
 dist/
-
-
