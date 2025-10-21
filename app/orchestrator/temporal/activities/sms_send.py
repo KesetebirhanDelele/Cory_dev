@@ -16,14 +16,11 @@
 
 from temporalio import activity
 from typing import Dict, Any
+from app.channels.providers.sms import send_sms_via_slicktext
 
 @activity.defn(name="sms_send")
 async def sms_send(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Stub SMS activity. Returns a fake provider reference."""
-    return {
-        "channel": "sms",
-        "enrollment_id": enrollment_id,
-        "provider_ref": f"stub-sms-{enrollment_id}",
-        "status": "queued",
-        "request": payload,
-    }
+    """SMS send activity — delegates to SlickText adapter."""
+    request = {"enrollment_id": enrollment_id, **payload}
+    return await send_sms_via_slicktext(request)
+
