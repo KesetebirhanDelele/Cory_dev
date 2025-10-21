@@ -21,7 +21,7 @@ git checkout main
 git fetch origin
 
 # Merge or fast-forward your local main to match remote main
-git pull origin main
+git merge origin/main
 
 
 ✅ Now your local main = origin/main (the latest team version).
