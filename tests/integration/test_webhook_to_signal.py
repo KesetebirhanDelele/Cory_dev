@@ -41,3 +41,68 @@ async def test_webhook_to_signal_bridge(monkeypatch):
     assert called["workflow_id"] == "workflow-123"
     assert called["event"]["event"] == "lead_created"
     assert "provider_ref" in called["event"]["payload"]
+from pydantic import ValidationError
+
+from app.orchestrator.temporal.common.provider_event import ProviderEvent, validate_provider_event
+
+
+def test_sms_delivered_contract_roundtrip():
+    payload = {
+        "status": "delivered",
+        "provider_ref": "sms_7f3c",
+        "channel": "sms",
+        "activity_id": "act_123",
+        "data": {"provider": "SlickText", "latency_ms": 820},
+    }
+    pe = ProviderEvent.from_dict(payload)
+    assert pe.status == "delivered"
+    assert pe.channel == "sms"
+    # Dict on the wire must match our minimal contract exactly
+    assert pe.to_signal_dict() == payload
+
+
+def test_email_bounced_contract():
+    payload = {
+        "status": "bounced",
+        "provider_ref": "mdr_88aa",
+        "channel": "email",
+        "activity_id": "act_124",
+        "data": {"smtp_code": 550, "reason": "User unknown"},
+    }
+    ok, err = validate_provider_event(payload)
+    assert ok, f"expected valid provider_event, got: {err}"
+
+
+def test_voice_completed_contract():
+    payload = {
+        "status": "completed",
+        "provider_ref": "call_55ab",
+        "channel": "voice",
+        "activity_id": "act_125",
+        "data": {"duration_s": 63, "summary": "answered"},
+    }
+    pe = ProviderEvent.from_dict(payload)
+    assert pe.channel == "voice"
+    assert pe.status == "completed"
+
+
+def test_missing_required_fields_fail_validation():
+    payload = {
+        "status": "delivered",
+        # "provider_ref" missing
+        "channel": "sms",
+        "activity_id": "act_999",
+    }
+    with pytest.raises(ValidationError):
+        ProviderEvent.from_dict(payload)
+
+
+def test_invalid_enum_values_fail_validation():
+    payload = {
+        "status": "unknown_status",
+        "provider_ref": "x",
+        "channel": "fax",
+        "activity_id": "act_000",
+    }
+    ok, err = validate_provider_event(payload)
+    assert not ok and "literal" in err.lower()

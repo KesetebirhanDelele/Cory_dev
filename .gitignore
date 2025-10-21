@@ -1,3 +1,9 @@
+.env
+.testenv.env
+.testenv/
+__pycache__/
+tests\__pycache__/
+
 # Environment files
 .env
 .testenv.env
