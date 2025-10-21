@@ -3,8 +3,8 @@ from fastapi import APIRouter, Request, BackgroundTasks, Header, HTTPException
 from typing import Optional
 from datetime import datetime
 import logging
-
 from app.web.schemas import normalize_webhook_event
+from app.orchestrator.temporal.signal_bridge import send_temporal_signal  # ✅ new import
 
 # 👇 ADD: import your Supabase repo client
 from app.repo.supabase_repo import SupabaseRepo
@@ -37,10 +37,6 @@ async def campaign_webhook(
     background_tasks: BackgroundTasks,   # <- you already have this
     x_signature: Optional[str] = Header(None),
 ):
-    """
-    Minimal webhook handler that normalizes payloads and returns 422 on invalid payload.
-    (Background processing is left as a placeholder.)
-    """
     body = await request.json()
     try:
         event = normalize_webhook_event(body)

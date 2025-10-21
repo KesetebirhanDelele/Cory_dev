@@ -1,5 +1,13 @@
 ﻿from temporalio import activity
 from typing import Dict, Any
+from app.channels.providers.sms import send_sms_via_slicktext
+
+@activity.defn(name="sms_send")
+async def sms_send(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """SMS send activity — delegates to SlickText adapter."""
+    request = {"enrollment_id": enrollment_id, **payload}
+    return await send_sms_via_slicktext(request)
+
 import logging
 
 from app.channels.providers import sms as sms_client
