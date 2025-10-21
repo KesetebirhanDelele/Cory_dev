@@ -1,5 +1,4 @@
-﻿.env
-.gitignore
+﻿.gitignore
 .pytest_cache
 .pytest_cache\.gitignore
 .pytest_cache\CACHEDIR.TAG
@@ -48,6 +47,7 @@ app\orchestrator\langgraph\graph.py
 app\orchestrator\langgraph\loop.py
 app\orchestrator\langgraph\nodes
 app\orchestrator\langgraph\nodes\__init__.py
+app\orchestrator\langgraph\nodes\instruction_node.py
 app\orchestrator\temporal
 app\orchestrator\temporal\__init__.py
 app\orchestrator\temporal\activities
@@ -71,6 +71,7 @@ app\orchestrator\temporal\worker.py
 app\orchestrator\temporal\workflows
 app\orchestrator\temporal\workflows\__init__.py
 app\orchestrator\temporal\workflows\campaign.py
+app\orchestrator\temporal\workflows\handoff.py
 app\policy
 app\policy\__init__.py
 app\policy\guards.py
@@ -104,11 +105,14 @@ diagram\langgraph-role.dot
 diagram\langgraph-role.svg
 diagram\n8n-role.dot
 diagram\n8n-role.svg
+docker-compose.temporal.yml
+docker-compose.yml
 docs
 docs\agent_catalog.md
 docs\error_taxonomy.md
 docs\signal_contract.md
 docs\state_snapshot_mapping.md
+GitCommands.MD
 pytest.ini
 README.md
 repo_structure.ps1
@@ -157,6 +161,8 @@ tests\integration
 tests\integration\test_activity_retries.py
 tests\integration\test_campaign_workflow.py
 tests\integration\test_campaign_workflow2.py
+tests\integration\test_handoff_flow.py
+tests\integration\test_handoff_flow2.py
 tests\integration\test_kpi_endpoints.py
 tests\integration\test_multistep.py
 tests\integration\test_rate_caps.py
@@ -173,6 +179,8 @@ tests\test_orchestrator_routing.py
 tests\test_webhook_schemas.py
 tests\unit
 tests\unit\test_handoff_repo.py
+tests\unit\test_langgraph_compile.py
+tests\unit\test_langgraph_nodes.py
 tests\unit\test_policy_guards.py
 tests\unit\test_supabase_repo.py
 tests\unit\test_temporal_activities.py
