@@ -2,8 +2,12 @@
 # tests/integration/test_handoff_flow.py
 import os, uuid, pytest
 from temporalio.client import Client
+from app.orchestrator.temporal.config import TEMPORAL_TARGET, TEMPORAL_NAMESPACE, TASK_QUEUE
 from app.orchestrator.temporal.workflows.handoff import HandoffWorkflow, HandoffInput
 
+# Resolve config from env with sensible defaults
+TEMPORAL_TARGET = os.getenv("TEMPORAL_TARGET", "localhost:7233")
+TEMPORAL_NAMESPACE = os.getenv("TEMPORAL_NAMESPACE", "default")
 TEST_ORG_ID = os.environ["TEST_ORG_ID"]  # set this in the test terminal
 
 @pytest.mark.asyncio

@@ -1,53 +1,127 @@
-﻿import asyncio, os, sys, logging, signal
+﻿# app/orchestrator/temporal/worker.py
+import asyncio
+import logging
+import os
+import signal
+import sys
+
 from temporalio.client import Client
 from temporalio.worker import Worker
 
 from app.orchestrator.temporal.workflows.campaign import CampaignWorkflow
+from app.orchestrator.temporal.workflows.handoff import HandoffWorkflow
+
 from app.orchestrator.temporal.activities.sms_send import sms_send
 from app.orchestrator.temporal.activities.email_send import email_send
 from app.orchestrator.temporal.activities.voice_start import voice_start
-from app.orchestrator.temporal.workflows.handoff import HandoffWorkflow
 from app.orchestrator.temporal.activities.handoff_create import (
-    create_handoff, resolve_handoff_rpc, mark_timed_out,
+    create_handoff,
+    resolve_handoff_rpc,
+    mark_timed_out,
 )
 
-TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "cory-campaigns")
-TEMPORAL_TARGET = os.getenv("TEMPORAL_TARGET", "127.0.0.1:7233")
-TEMPORAL_NAMESPACE = os.getenv("TEMPORAL_NAMESPACE", "default")
+# ------------------------------------------------------------------------------
+# Config: prefer central module if available; fall back to environment defaults.
+# ------------------------------------------------------------------------------
+try:
+    from app.orchestrator.temporal.config import (  # type: ignore
+        TEMPORAL_TARGET as _CFG_TARGET,
+        TEMPORAL_NAMESPACE as _CFG_NAMESPACE,
+        TASK_QUEUE as _CFG_TASK_QUEUE,
+    )
+    TEMPORAL_TARGET = _CFG_TARGET
+    TEMPORAL_NAMESPACE = _CFG_NAMESPACE
+    TASK_QUEUE = _CFG_TASK_QUEUE
+except Exception:
+    TEMPORAL_TARGET = os.getenv("TEMPORAL_TARGET", "127.0.0.1:7233")
+    TEMPORAL_NAMESPACE = os.getenv("TEMPORAL_NAMESPACE", "default")
+    TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "cory-campaigns")
 
 log = logging.getLogger(__name__)
 
-async def run():
+
+async def _preflight(client: Client) -> None:
+    """
+    Try a lightweight info call if supported; otherwise skip without failing.
+    Compatible with older Temporal Python SDKs that lack get_system_info().
+    """
+    try:
+        # Newer SDKs expose client.workflow_service.get_system_info()
+        svc = getattr(client, "workflow_service", None)
+        if svc and hasattr(svc, "get_system_info"):
+            info = await svc.get_system_info()           # ok on newer SDKs
+            server_version = getattr(info, "server_version", "unknown")
+            log.info("Temporal server version: %s", server_version)
+        else:
+            log.info("Preflight: skipping system info (SDK lacks get_system_info).")
+    except Exception as e:
+        # Don't block startup on optional preflight
+        log.warning("Preflight info check failed (non-fatal): %s", e)
+
+async def run() -> None:
+    # On Windows, Proactor policy is default; Temporal works fine there,
+    # but some environments prefer Selector. Toggle via env if needed.
+    if sys.platform == "win32" and os.getenv("USE_SELECTOR_LOOP", "0") == "1":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    log.info(
+        "Starting worker | target=%s namespace=%s queue=%s",
+        TEMPORAL_TARGET, TEMPORAL_NAMESPACE, TASK_QUEUE
+    )
+
     client = await Client.connect(TEMPORAL_TARGET, namespace=TEMPORAL_NAMESPACE)
-    log.info("Connected to Temporal at %s (ns=%s)", TEMPORAL_TARGET, TEMPORAL_NAMESPACE)
+    await _preflight(client)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
 
-    # Only register OS signal handlers on POSIX; Windows raises NotImplementedError
+    # Register signal handlers only where supported (POSIX).
     if sys.platform != "win32":
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, stop_event.set)
+            try:
+                loop.add_signal_handler(sig, stop_event.set)
+            except NotImplementedError:
+                pass
+
+    activities = [
+        sms_send,
+        email_send,
+        voice_start,
+        create_handoff,
+        resolve_handoff_rpc,
+        mark_timed_out,
+    ]
+    workflows = [CampaignWorkflow, HandoffWorkflow]
 
     try:
         async with Worker(
             client,
             task_queue=TASK_QUEUE,
-            workflows=[CampaignWorkflow, HandoffWorkflow],
-            activities=[sms_send, email_send, voice_start, create_handoff, resolve_handoff_rpc, mark_timed_out],
+            workflows=workflows,
+            activities=activities,
         ):
             log.info("Worker started on task queue: %s", TASK_QUEUE)
             if sys.platform == "win32":
-                # On Windows, just wait forever; Ctrl+C raises KeyboardInterrupt
+                # On Windows, just wait forever; Ctrl+C raises KeyboardInterrupt.
                 await asyncio.Future()
             else:
                 await stop_event.wait()
     except KeyboardInterrupt:
         log.info("KeyboardInterrupt — shutting down worker")
+    except asyncio.CancelledError:
+        log.info("Worker cancelled — shutting down")
+    finally:
+        # Client is closed by the context manager on exit; nothing special needed here.
+        log.info("Worker stopped")
 
-def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     asyncio.run(run())
+
 
 if __name__ == "__main__":
     main()
