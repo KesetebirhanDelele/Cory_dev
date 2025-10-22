@@ -55,6 +55,7 @@ filelock==3.16.1
 Flask==3.1.0
 flatbuffers==24.3.25
 fonttools==4.54.1
+freezegun==1.5.1
 frozenlist==1.4.1
 fsspec==2025.2.0
 git-filter-repo==2.47.0
@@ -209,6 +210,7 @@ sympy==1.13.3
 temporalio==1.6.0
 tenacity==9.1.2
 tiktoken==0.9.0
+time-machine==2.14.1
 tokenizers==0.20.3
 tomli==2.2.1
 tomli_w==1.2.0
