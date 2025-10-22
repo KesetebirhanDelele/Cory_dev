@@ -136,6 +136,11 @@ async def send_sms_via_slicktext(
       - If org_id/enrollment_id are not provided, fall back to metadata.
     """
     meta = metadata or {}
+    if "trace_id" not in meta:
+        from app.common.tracing import get_trace_id
+        tid = get_trace_id()
+        if tid:
+            meta["trace_id"] = tid
     resolved_org_id = org_id or meta.get("org_id", "unknown-org")
     resolved_enrollment_id = enrollment_id or meta.get("enrollment_id", "unknown-enrollment")
 

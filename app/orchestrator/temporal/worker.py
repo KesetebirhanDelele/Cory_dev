@@ -20,6 +20,10 @@ from app.orchestrator.temporal.activities.handoff_create import (
     mark_timed_out,
 )
 
+from app.common.tracing import setup_logging, set_trace_id  # NEW
+from temporalio import activity  # ensure this import exists
+from app.common.tracing import set_trace_id
+
 # ------------------------------------------------------------------------------
 # Config: prefer central module if available; fall back to environment defaults.
 # ------------------------------------------------------------------------------
@@ -114,14 +118,32 @@ async def run() -> None:
         # Client is closed by the context manager on exit; nothing special needed here.
         log.info("Worker stopped")
 
+def with_trace_id(fn):
+    async def wrapper(*args, **kwargs):
+        info = activity.info()
+        headers = getattr(info, "headers", {}) or {}
+        tid = headers.get(b"trace_id")
+        set_trace_id(tid.decode("utf-8", "ignore") if isinstance(tid, (bytes, bytearray)) else None)
+        try:
+            return await fn(*args, **kwargs)
+        finally:
+            set_trace_id(None)
+    return wrapper
+
+activities = [
+    with_trace_id(sms_send),
+    with_trace_id(email_send),
+    with_trace_id(voice_start),
+    with_trace_id(create_handoff),
+    with_trace_id(resolve_handoff_rpc),
+    with_trace_id(mark_timed_out),
+]
+# then pass activities=activities to Worker(...)
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    from app.common.tracing import setup_logging
+    setup_logging()  # must be first to install the record factory
     asyncio.run(run())
-
 
 if __name__ == "__main__":
     main()
