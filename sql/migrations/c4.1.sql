@@ -11,13 +11,12 @@ declare
 begin
   update public.handoffs
      set status = 'resolved',
-         -- put resolution under payload.resolution
-         payload = jsonb_set(
-                     coalesce(payload, '{}'::jsonb),
-                     '{resolution}',
-                     coalesce(p_resolution, '{}'::jsonb),
-                     true
-                   ),
+         outcome_snapshot = jsonb_set(
+                               coalesce(outcome_snapshot, '{}'::jsonb),
+                               '{resolution}',
+                               coalesce(p_resolution, '{}'::jsonb),
+                               true
+                             ),
          resolved_at = now()
    where id = p_handoff
    returning to_jsonb(handoffs.*) into rec;
@@ -33,5 +32,5 @@ $$;
 grant execute on function public.resolve_handoff(uuid, jsonb)
   to anon, authenticated, service_role;
 
--- refresh PostgREST schema cache
+-- refresh PostgREST
 notify pgrst, 'reload schema';
