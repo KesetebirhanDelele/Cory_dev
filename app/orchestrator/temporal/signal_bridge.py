@@ -1,4 +1,6 @@
 # app/orchestrator/temporal/signal_bridge.py
+from __future__ import annotations
+
 import logging
 import asyncio
 
@@ -14,7 +16,6 @@ async def send_temporal_signal(workflow_id: str, event_dict: dict) -> bool:
     logger.info("Signal sent to workflow", extra={"workflow_id": workflow_id})
     return True
 
-from __future__ import annotations
 
 import os
 import logging
