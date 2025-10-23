@@ -1,4 +1,6 @@
 ﻿.env
+.githooks
+.githooks\commit-msg
 .gitignore
 .pytest_cache
 .pytest_cache\.gitignore
@@ -28,6 +30,8 @@ app\channels\providers\sms.py
 app\channels\providers\voice.py
 app\channels\sms_sender.py
 app\channels\voice_dialer.py
+app\common
+app\common\tracing.py
 app\config.py
 app\data
 app\data\__init__.py
@@ -147,6 +151,7 @@ sql\migrations\002_rls_roles.sql
 sql\migrations\0031_handoff.sql
 sql\migrations\0032_handoff_rpc.sql
 sql\migrations\0032_queries
+sql\migrations\c4.1.sql
 sql\migrations\README.MD
 sql\migrations\v_variant_attribution.sql
 sql\ops
@@ -169,12 +174,14 @@ tests\integration
 tests\integration\test_activity_retries.py
 tests\integration\test_campaign_workflow.py
 tests\integration\test_campaign_workflow2.py
+tests\integration\test_determinism.py
 tests\integration\test_handoff_flow.py
 tests\integration\test_handoff_flow2.py
 tests\integration\test_kpi_endpoints.py
 tests\integration\test_multistep.py
 tests\integration\test_rate_caps.py
 tests\integration\test_snapshot_slo.py
+tests\integration\test_trace_id.py
 tests\integration\test_webhook_repo.py
 tests\integration\test_webhook_to_signal.py
 tests\sql
