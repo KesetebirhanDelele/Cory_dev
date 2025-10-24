@@ -1,6 +1,9 @@
 import asyncio, os, sys
 from temporalio.client import Client
 
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv(usecwd=True), override=False)
+
 async def main(wfid):
     client = await Client.connect(os.getenv("TEMPORAL_TARGET","127.0.0.1:7233"),
                                   namespace=os.getenv("TEMPORAL_NAMESPACE","default"))

@@ -1,6 +1,7 @@
 ﻿# app/orchestrator/temporal/worker.py
 from __future__ import annotations
-
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv(usecwd=True), override=False)
 import asyncio
 import logging
 import os
