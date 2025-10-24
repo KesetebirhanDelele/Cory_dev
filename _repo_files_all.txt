@@ -31,6 +31,7 @@ app\channels\providers\voice.py
 app\channels\sms_sender.py
 app\channels\voice_dialer.py
 app\common
+app\common\bootstrap_env.py
 app\common\tracing.py
 app\config.py
 app\data
@@ -60,6 +61,12 @@ app\orchestrator\temporal\activities\__init__.py
 app\orchestrator\temporal\activities\email_send.py
 app\orchestrator\temporal\activities\handoff_create.py
 app\orchestrator\temporal\activities\interactions_log.py
+app\orchestrator\temporal\activities\program_match.py
+app\orchestrator\temporal\activities\rag.py
+app\orchestrator\temporal\activities\rag_compose.py
+app\orchestrator\temporal\activities\rag_redact.py
+app\orchestrator\temporal\activities\rag_retrieve.py
+app\orchestrator\temporal\activities\rag_route.py
 app\orchestrator\temporal\activities\sms_send.py
 app\orchestrator\temporal\activities\voice_start.py
 app\orchestrator\temporal\common
@@ -74,14 +81,19 @@ app\orchestrator\temporal\schedules.py
 app\orchestrator\temporal\signal_bridge.py
 app\orchestrator\temporal\temporal_build_plan.md
 app\orchestrator\temporal\worker.py
+app\orchestrator\temporal\worker_rag.py
 app\orchestrator\temporal\workflows
 app\orchestrator\temporal\workflows\__init__.py
 app\orchestrator\temporal\workflows\campaign.py
+app\orchestrator\temporal\workflows\doc_ingest_cron.py
 app\orchestrator\temporal\workflows\handoff.py
+app\orchestrator\temporal\workflows\program_match.py
+app\orchestrator\temporal\workflows\rag_answer.py
 app\policy
 app\policy\__init__.py
 app\policy\guards.py
 app\policy\guards_budget.py
+app\policy\matching_dsl.py
 app\repo
 app\repo\dtos.py
 app\repo\handoff_repo.py
@@ -131,11 +143,17 @@ repo_structure.ps1
 requirements-dev.txt
 scripts
 scripts\generate_openapi_examples.py
+scripts\quick_db_check.py
+scripts\run_ingest_once.py
+scripts\start_answer_builder.py
+scripts\start_program_match.py
+scripts\terminate_match.py
 seeding
 seeding\__init__.py
 seeding\1.unique_indexes.sql
 seeding\2.seed_organization.sql
 seeding\B2.2 SEED.sql
+seeding\c5.1.sql
 seeding\seed_minimal.py
 sql
 sql tests
@@ -152,6 +170,9 @@ sql\migrations\0031_handoff.sql
 sql\migrations\0032_handoff_rpc.sql
 sql\migrations\0032_queries
 sql\migrations\c4.1.sql
+sql\migrations\c5.1.sql
+sql\migrations\c5.2b.sql
+sql\migrations\c5.2c.sql
 sql\migrations\README.MD
 sql\migrations\v_variant_attribution.sql
 sql\ops
@@ -169,6 +190,8 @@ tests\__init__.py
 tests\conftest.py
 tests\docs
 tests\docs\test_agent_catalog.py
+tests\evals
+tests\evals\test_program_match.py
 tests\fake_providers.py
 tests\integration
 tests\integration\test_activity_retries.py

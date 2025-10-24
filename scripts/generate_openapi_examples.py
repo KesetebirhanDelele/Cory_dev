@@ -1,7 +1,8 @@
 # scripts/generate_openapi_examples.py
 import json
 from app.web.schemas import WebhookEvent, EmailWebhookEvent, SmsWebhookEvent, VoiceWebhookEvent
-
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv(usecwd=True), override=False)
 examples = {
     "webhook_event": {
         "schema": WebhookEvent.model_json_schema(),

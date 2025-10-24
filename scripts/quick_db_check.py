@@ -1,5 +1,6 @@
 import asyncio, os, asyncpg, time
-
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv(usecwd=True), override=False)
 async def main():
     dsn = os.getenv("DATABASE_URL")
     print("DSN:", dsn)
