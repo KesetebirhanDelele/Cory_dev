@@ -3,7 +3,7 @@
 .testenv/
 __pycache__/
 tests\__pycache__/
-
+*.pyc 
 # Environment files
 .env
 .testenv.env
@@ -45,3 +45,5 @@ tests/.pytest_cache/
 *.egg-info/
 build/
 dist/
+__pycache__/
+*.pyc
