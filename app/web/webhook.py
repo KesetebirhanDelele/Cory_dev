@@ -8,6 +8,7 @@ from app.web.schemas import normalize_webhook_event
 from app.web.security import verify_request_signature
 from app.repo.supabase_repo import SupabaseRepo
 from app.orchestrator.temporal.signal_bridge import send_temporal_signal
+from app.web import metrics as metrics_mod
 
 router = APIRouter()
 logger = logging.getLogger("cory.webhook")
@@ -51,6 +52,19 @@ async def campaign_webhook(
     except Exception as e:
         logger.warning("invalid webhook payload", extra={"error": str(e)})
         raise HTTPException(status_code=422, detail="invalid payload")
+
+    # ✅ Idempotency check (avoid reprocessing duplicates)
+    ref = getattr(event, "provider_ref", None) or getattr(event, "id", None)
+    if not ref:
+        raise HTTPException(status_code=400, detail="missing event reference")
+
+    cache = request.app.state.processed_refs
+    if ref in cache:
+        logger.info("Duplicate webhook ignored", extra={"ref": ref})
+        metrics_mod.IDEMPOTENT_HITS.inc()  # ✅ increment metric for duplicates
+        return {"status": "duplicate"}
+
+    cache.set(ref, True)  # store it for future duplicate detection
 
     # Trigger snapshot refresh (non-blocking)
     background_tasks.add_task(_refresh_snapshot_bg)

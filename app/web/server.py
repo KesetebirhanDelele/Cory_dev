@@ -1,6 +1,7 @@
 # app/web/server.py
 from fastapi import FastAPI
 from datetime import datetime, timezone
+from app.web import metrics
 
 from app.web.middleware import setup_middleware
 from app.web.webhook import router as webhook_router
@@ -33,11 +34,20 @@ def create_app() -> FastAPI:
     app.include_router(wa_router)
     app.include_router(handoffs_router)
     app.include_router(kpi_router)
+    app.include_router(metrics.router)
 
     # ✅ Health check
     @app.get("/healthz")
     def healthz():
         return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    @app.get("/readyz")
+    async def readyz():
+     """
+     Readiness probe for orchestrator and DB.
+     For now, returns simple 200 with status 'ready'.
+     """
+     return {"status": "ready"}
 
     # ✅ Idempotency cache
     idempotency_cache = IdempotencyCache(ttl_seconds=300)
