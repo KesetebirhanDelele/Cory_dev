@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Any, Dict, List
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
 @activity.defn(name="compose_answer")
 async def compose_answer(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -14,7 +15,7 @@ async def compose_answer(args: Dict[str, Any]) -> Dict[str, Any]:
     chunks: List[Dict[str, Any]] = args.get("chunks") or []
 
     if not question:
-        raise activity.ApplicationError("compose_answer: missing 'question'", non_retryable=True)
+        raise ApplicationError("compose_answer: missing 'question'", non_retryable=True)
 
     if not chunks:
         answer = (
