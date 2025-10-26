@@ -54,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(wa_router)
     app.include_router(handoffs_router)
     app.include_router(kpi_router)
+    app.include_router(metrics.router)
 
     # ✅ Health check
     @app.get("/healthz")
