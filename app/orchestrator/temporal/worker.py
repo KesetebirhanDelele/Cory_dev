@@ -1,23 +1,41 @@
 ﻿# app/orchestrator/temporal/worker.py
 from __future__ import annotations
-from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv(usecwd=True), override=False)
 import asyncio
 import logging
 import os
 import signal
 import sys
-from typing import List
+from typing import List, Optional
 
+from dotenv import load_dotenv, find_dotenv
 from temporalio.client import Client
 from temporalio.worker import Worker
 
 from app.common.tracing import setup_logging
 
-# -------- Existing workflows/activities --------
+TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "cory-campaigns")
+AI_MATCH_QUEUE = os.getenv("AI_MATCH_QUEUE", "ai-match-q")
+RAG_QUEUE = os.getenv("RAG_QUEUE", "rag-q")
+
+# --------------------------------------------------------------------------
+# Environment bootstrap
+# --------------------------------------------------------------------------
+load_dotenv(find_dotenv(usecwd=True), override=False)
+print(f"[BOOTSTRAP] Loaded .env from {find_dotenv(usecwd=True)}")
+
+log = logging.getLogger("cory.worker")
+
+# --------------------------------------------------------------------------
+# Workflows
+# --------------------------------------------------------------------------
+from app.orchestrator.temporal.workflows.answer_builder import AnswerWorkflow
 from app.orchestrator.temporal.workflows.campaign import CampaignWorkflow
 from app.orchestrator.temporal.workflows.handoff import HandoffWorkflow
+from app.orchestrator.temporal.workflows.program_match import ProgramMatchWf
 
+# --------------------------------------------------------------------------
+# Activities
+# --------------------------------------------------------------------------
 from app.orchestrator.temporal.activities.sms_send import sms_send
 from app.orchestrator.temporal.activities.email_send import email_send
 from app.orchestrator.temporal.activities.voice_start import voice_start
@@ -26,88 +44,125 @@ from app.orchestrator.temporal.activities.handoff_create import (
     resolve_handoff_rpc,
     mark_timed_out,
 )
+from app.orchestrator.temporal.activities import (
+    rag_retrieve,
+    rag_redact,
+    rag_compose,
+    rag_route,
+    program_match as match_acts,
+)
 
-# -------- C5.1: Program/Persona Matching --------
-from app.orchestrator.temporal.workflows.program_match import ProgramMatchWf
-from app.orchestrator.temporal.activities import program_match as match_acts
-
-# -------- Config: prefer central module; else env --------
+# --------------------------------------------------------------------------
+# Configuration
+# --------------------------------------------------------------------------
 try:
-    from app.orchestrator.temporal.config import (  # type: ignore
+    from app.orchestrator.temporal.config import (
         TEMPORAL_TARGET as _CFG_TARGET,
         TEMPORAL_NAMESPACE as _CFG_NAMESPACE,
         TASK_QUEUE as _CFG_TASK_QUEUE,
         AI_MATCH_QUEUE as _CFG_AI_MATCH_QUEUE,
+        RAG_QUEUE as _CFG_RAG_QUEUE,
     )
+
     TEMPORAL_TARGET = _CFG_TARGET
     TEMPORAL_NAMESPACE = _CFG_NAMESPACE
     TASK_QUEUE = _CFG_TASK_QUEUE
     AI_MATCH_QUEUE = _CFG_AI_MATCH_QUEUE
+    RAG_QUEUE = _CFG_RAG_QUEUE
+
 except Exception:
     TEMPORAL_TARGET = os.getenv("TEMPORAL_TARGET", "127.0.0.1:7233")
     TEMPORAL_NAMESPACE = os.getenv("TEMPORAL_NAMESPACE", "default")
     TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "cory-campaigns")
     AI_MATCH_QUEUE = os.getenv("AI_MATCH_QUEUE", "ai-match-q")
+    RAG_QUEUE = os.getenv("RAG_QUEUE", "rag-q")
 
-log = logging.getLogger(__name__)
 
-
-# ---------------- Helpers ----------------
+# --------------------------------------------------------------------------
+# Helper Functions
+# --------------------------------------------------------------------------
 async def _preflight(client: Client) -> None:
-    """Best-effort server version log; no-ops on SDKs without this RPC."""
+    """Attempt to log Temporal server version and verify connectivity."""
     try:
         from temporalio.api.workflowservice.v1 import GetSystemInfoRequest  # type: ignore
         info = await client.workflow_service.get_system_info(GetSystemInfoRequest())  # type: ignore
         log.info("Temporal server version: %s", getattr(info, "server_version", "unknown"))
-    except Exception:
-        # Quietly skip on any mismatch
-        pass
+    except Exception as e:
+        log.warning("Preflight check skipped or failed: %s", e)
 
 
-async def _serve_queue(client: Client, task_queue: str, workflows: List, activities: List):
-    log.info("Initializing worker for queue: %s", task_queue)
+async def _connect_temporal(
+    target: str, namespace: str, retries: int = 3, delay: int = 3
+) -> Client:
+    """Retry logic for Temporal Client connection."""
+    for attempt in range(1, retries + 1):
+        try:
+            log.info("Connecting to Temporal server (%s@%s) — attempt %d/%d", namespace, target, attempt, retries)
+            client = await Client.connect(target, namespace=namespace)
+            log.info("Connected to Temporal server: %s", target)
+            return client
+        except Exception as e:
+            log.warning("Connection attempt %d failed: %s", attempt, e)
+            if attempt < retries:
+                await asyncio.sleep(delay)
+    raise RuntimeError(f"Failed to connect to Temporal server after {retries} attempts")
+
+
+async def _serve_queue(
+    client: Client,
+    queue_name: str,
+    workflows: List,
+    activities: List,
+) -> None:
+    """Start and run a Temporal worker for a given task queue."""
+    log.info("🚀 Starting worker | queue=%s | workflows=%d | activities=%d",
+             queue_name, len(workflows), len(activities))
     worker = Worker(
-        client,
-        task_queue=task_queue,
+        client=client,
+        task_queue=queue_name,
         workflows=workflows,
-        activities=activities,  # register callables directly
+        activities=activities,
     )
     try:
-        log.info("Worker starting on task queue: %s", task_queue)
-        await worker.run()  # blocks until cancelled
+        await worker.run()
+    except asyncio.CancelledError:
+        log.info("Worker on %s cancelled — shutting down gracefully", queue_name)
     except Exception as e:
-        log.exception("Worker crashed on queue %s: %s", task_queue, e)
+        log.exception("Worker crashed on queue %s: %s", queue_name, e)
         raise
 
 
-# ---------------- Launcher ----------------
+# --------------------------------------------------------------------------
+# Main Runner
+# --------------------------------------------------------------------------
 async def run() -> None:
-    # Optional Windows selector loop for libs that need it
-    if sys.platform == "win32" and os.getenv("USE_SELECTOR_LOOP", "0") == "1":
+    """Entrypoint for initializing Temporal workers."""
+    if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+    setup_logging()
     log.info(
-        "Starting workers | target=%s namespace=%s queues=[%s, %s]",
+        "🧠 Cory Temporal Worker starting | target=%s | namespace=%s | queues=%s",
         TEMPORAL_TARGET,
         TEMPORAL_NAMESPACE,
-        TASK_QUEUE,
-        AI_MATCH_QUEUE,
+        [TASK_QUEUE, AI_MATCH_QUEUE, RAG_QUEUE],
     )
 
-    client = await Client.connect(TEMPORAL_TARGET, namespace=TEMPORAL_NAMESPACE)
+    client = await _connect_temporal(TEMPORAL_TARGET, TEMPORAL_NAMESPACE)
     await _preflight(client)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
-    if sys.platform != "win32":
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, stop_event.set)
-            except NotImplementedError:
-                pass
 
-    # Campaign/Handoff worker
-    campaigns_workflows = [CampaignWorkflow, HandoffWorkflow]
+    # Cross-platform signal handling
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop_event.set)
+        except NotImplementedError:
+            pass
+
+    # Define workflow groups
+    campaigns_workflows = [CampaignWorkflow, HandoffWorkflow, AnswerWorkflow]
     campaigns_activities = [
         sms_send,
         email_send,
@@ -117,7 +172,6 @@ async def run() -> None:
         mark_timed_out,
     ]
 
-    # ProgramMatch worker
     match_workflows = [ProgramMatchWf]
     match_activities = [
         match_acts.load_rules,
@@ -126,43 +180,66 @@ async def run() -> None:
         match_acts.persist_scores,
     ]
 
-    # Start both queues concurrently and surface failures
+    rag_workflows = [AnswerWorkflow]
+    rag_activities = [
+        rag_retrieve.retrieve_chunks,
+        rag_redact.redact_enforce,
+        rag_compose.compose_answer,
+        rag_route.route,
+    ]
+
+    # Launch workers concurrently
+        # ✅ Ensure each worker runs on a unique queue
     worker_tasks = [
+        # Campaigns and handoffs
         asyncio.create_task(
-            _serve_queue(client, TASK_QUEUE, campaigns_workflows, campaigns_activities), name="campaigns"
+            _serve_queue(client, TASK_QUEUE, campaigns_workflows, campaigns_activities),
+            name="campaigns",
         ),
+
+        # AI program matching
         asyncio.create_task(
-            _serve_queue(client, AI_MATCH_QUEUE, match_workflows, match_activities), name="ai-match"
+            _serve_queue(client, AI_MATCH_QUEUE, match_workflows, match_activities),
+            name="ai-match",
+        ),
+
+        # RAG + Answer builder
+        asyncio.create_task(
+            _serve_queue(client, RAG_QUEUE, rag_workflows, rag_activities),
+            name="rag",
         ),
     ]
 
+    log.info(
+        "✅ Worker queues initialized: campaigns=%s, ai-match=%s, rag=%s",
+        TASK_QUEUE,
+        AI_MATCH_QUEUE,
+        RAG_QUEUE,
+    )
+
     for t in worker_tasks:
-        def _cb(task: asyncio.Task):
-            exc = task.exception()
-            if exc:
-                log.exception("Worker task %s exited with exception: %s", task.get_name(), exc)
-        t.add_done_callback(_cb)
+        t.add_done_callback(lambda task: (
+            log.exception("Worker %s exited with: %s", task.get_name(), task.exception())
+            if task.exception() else None
+        ))
 
     try:
-        if sys.platform == "win32":
-            await asyncio.Future()  # Ctrl+C -> KeyboardInterrupt
-        else:
-            await stop_event.wait()
-    except KeyboardInterrupt:
-        log.info("KeyboardInterrupt — shutting down workers")
+        await stop_event.wait()
+        log.info("🛑 Stop signal received — shutting down workers...")
     finally:
         for t in worker_tasks:
             t.cancel()
         await asyncio.gather(*worker_tasks, return_exceptions=True)
-        log.info("Workers stopped")
+        log.info("✅ All workers stopped cleanly.")
 
 
+# --------------------------------------------------------------------------
 def main() -> None:
-    setup_logging()  # install record factory first
+    """CLI entrypoint for launching all Temporal workers."""
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        pass
+        log.info("KeyboardInterrupt — exiting.")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
-# db.py — Supabase REST API version (public schema)
+# app/data/db.py — Supabase REST API version (public schema)
 from supabase import create_client, Client
 from typing import Any, Dict, List
 import os
 from dotenv import load_dotenv
+from openai import OpenAI
 
 # Load environment variables
 load_dotenv()
@@ -93,3 +94,49 @@ def rpc_ingest_phone_logs(max_rows: int = 100) -> int:
     except (ValueError, TypeError):
         print(f"⚠️ Unexpected RPC response: {response.data}")
         return 0
+
+# ---------- RAG Retrieval (for AnswerWorkflow) ----------
+def retrieve_rag_chunks(query: str, threshold: float = 0.75, match_count: int = 5) -> List[Dict[str, Any]]:
+    """
+    Retrieve relevant document chunks from the embeddings table using pgvector similarity search.
+    Requires:
+      - Table: embeddings(doc_id, content, embedding)
+      - RPC: match_documents(query_embedding, similarity_threshold, match_count)
+    """
+
+    # Log context for debug
+    print(f"🔍 RAG Retrieval | query='{query}' | threshold={threshold}")
+
+    # Initialize OpenAI client
+    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    # Generate embedding for the query text
+    embedding = openai_client.embeddings.create(
+        input=query,
+        model="text-embedding-3-small"
+    ).data[0].embedding
+
+    # Call your Supabase RPC
+    response = supabase.rpc(
+        "match_documents",
+        {
+            "query_embedding": embedding,
+            "similarity_threshold": threshold,
+            "match_count": match_count,
+        },
+    ).execute()
+
+    results = response.data or []
+    print(f"✅ Retrieved {len(results)} matches from Supabase")
+
+    # Normalize into consistent format for Temporal activities
+    chunks = [
+        {
+            "doc_id": r.get("id"),
+            "content": r.get("content"),
+            "score": r.get("similarity", 0),
+        }
+        for r in results
+    ]
+
+    return chunks

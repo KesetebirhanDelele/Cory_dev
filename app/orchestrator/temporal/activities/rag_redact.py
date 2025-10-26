@@ -1,40 +1,59 @@
+# app/orchestrator/temporal/activities/rag_redact.py
 from __future__ import annotations
-import re
 from typing import Any, Dict, List
 from temporalio import activity
+import re
 
-EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-PHONE_RE = re.compile(r"(?:\+?\d[\s\-\.()]*){7,}")  # rough mask for dev
-
-def _mask(text: str) -> tuple[str, List[str]]:
-    log: List[str] = []
-    def _do(regex, label):
-        nonlocal text, log
-        def repl(m):
-            log.append(f"{label}: {m.group(0)}")
-            return "[REDACTED]"
-        text = regex.sub(repl, text)
-    _do(EMAIL_RE, "email")
-    _do(PHONE_RE, "phone")
-    return text, log
 
 @activity.defn(name="redact_enforce")
-async def redact_enforce(draft: Dict[str, Any]) -> Dict[str, Any]:
+async def redact_enforce(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Input: {"answer": str, "citations": [...]}
-    Output: {"answer": str, "citations": [...], "confidence": float, "redaction_log": [...]}
+    Apply redaction policies to retrieved text chunks.
+    Removes or masks PII or sensitive terms before composition.
+
+    Args:
+        chunks: List of document chunk dictionaries.
+
+    Returns:
+        List of redacted chunks (same structure).
     """
-    if not isinstance(draft, dict) or "answer" not in draft:
-        raise activity.ApplicationError("redact_enforce: bad input", non_retryable=True)
+    if not chunks:
+        activity.logger.info("No chunks received for redaction.")
+        return []
 
-    answer = str(draft["answer"])
-    redacted, log = _mask(answer)
+    activity.logger.info("Starting redaction | total_chunks=%d", len(chunks))
 
-    # naive confidence: more sources -> higher confidence
-    cites = draft.get("citations") or []
-    n = max(0, min(3, len(cites)))
-    confidence = {0: 0.35, 1: 0.6, 2: 0.75, 3: 0.88}[n]
+    redacted_chunks: List[Dict[str, Any]] = []
+    total_replacements = 0
 
-    out = dict(draft)
-    out.update({"answer": redacted, "confidence": confidence, "redaction_log": log})
-    return out
+    # Simple redaction rules — expand these as policies evolve
+    pii_patterns = [
+        r"\b\d{3}-\d{2}-\d{4}\b",  # SSN pattern
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",  # Email
+        r"\b\d{10}\b",  # Plain 10-digit numbers
+    ]
+
+    for c in chunks:
+        text = c.get("content", "")
+        original_text = text
+
+        for pattern in pii_patterns:
+            text, replacements = re.subn(pattern, "[REDACTED]", text)
+            total_replacements += replacements
+
+        if text != original_text:
+            activity.logger.debug("Redacted content in doc_id=%s", c.get("doc_id"))
+
+        redacted_chunks.append({
+            "doc_id": c.get("doc_id"),
+            "content": text.strip(),
+            "score": c.get("score", 0)
+        })
+
+    activity.logger.info(
+        "Redaction complete | total_chunks=%d | total_replacements=%d",
+        len(redacted_chunks),
+        total_replacements
+    )
+
+    return redacted_chunks

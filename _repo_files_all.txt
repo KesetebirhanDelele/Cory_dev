@@ -84,6 +84,7 @@ app\orchestrator\temporal\worker.py
 app\orchestrator\temporal\worker_rag.py
 app\orchestrator\temporal\workflows
 app\orchestrator\temporal\workflows\__init__.py
+app\orchestrator\temporal\workflows\answer_builder.py
 app\orchestrator\temporal\workflows\campaign.py
 app\orchestrator\temporal\workflows\doc_ingest_cron.py
 app\orchestrator\temporal\workflows\handoff.py
@@ -109,6 +110,7 @@ app\web\openapi_examples.json
 app\web\routes_handoffs.py
 app\web\routes_kpi.py
 app\web\schemas.py
+app\web\security.py
 app\web\server.py
 app\web\sms_webhook.py
 app\web\voice_webhook.py
@@ -145,6 +147,7 @@ scripts
 scripts\generate_openapi_examples.py
 scripts\quick_db_check.py
 scripts\run_ingest_once.py
+scripts\seed_embeddings.py
 scripts\start_answer_builder.py
 scripts\start_program_match.py
 scripts\terminate_match.py
@@ -169,6 +172,7 @@ sql\migrations\002_rls_roles.sql
 sql\migrations\0031_handoff.sql
 sql\migrations\0032_handoff_rpc.sql
 sql\migrations\0032_queries
+sql\migrations\004_rag_embeddings.sql
 sql\migrations\c4.1.sql
 sql\migrations\c5.1.sql
 sql\migrations\c5.2b.sql
@@ -233,5 +237,6 @@ tests\web\test_kpi_route.py
 tests\web\test_schemas.py
 tests\web\test_sms_webhook.py
 tests\web\test_webhook_email.py
+tests\web\test_webhook_replay.py
 tests\web\test_webhook_voice.py
 tests\web\test_webhook_wa.py
