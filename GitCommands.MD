@@ -10,21 +10,25 @@ Develop, commit, and push changes only in that branch.
 
 Later open a PR (pull request) to merge back into main.
 
-🧱 1️⃣ Start fresh: update local main from remote main
+# Stash a backup of ONLY .env (includes untracked files)
+git stash push -m "backup .env" --include-untracked .env
 
+🧱 1️⃣ Start fresh: update local main from remote main
 Always begin by syncing your local main with GitHub’s latest main.
 
-# Switch to your main branch
+## Switch to your main branch
 git checkout main
 
-# Fetch the latest updates from GitHub
+## Fetch the latest updates from GitHub
 git fetch origin
 
-# Merge or fast-forward your local main to match remote main
+## Merge or fast-forward your local main to match remote main
 git merge origin/main
 
+# Restore if it went missing
+git stash pop   # will put .env back if needed
 
-✅ Now your local main = origin/main (the latest team version).
+# ✅ Now your local main = origin/main (the latest team version).
 
 🌿 2️⃣ Create a new branch for your new ticket
 

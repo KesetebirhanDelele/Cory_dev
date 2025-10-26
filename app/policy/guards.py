@@ -1,3 +1,4 @@
+# app/policy/guards_budget.py
 from __future__ import annotations
 
 import logging
@@ -5,6 +6,16 @@ from datetime import datetime, time, timedelta, timezone
 from typing import Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+CONFIDENCE_THRESHOLD = 0.6
+
+import os
+# ---- LLM spend caps (defaults; override via env) ----
+# (keep/define any other channel budgets you use here, e.g.)
+LLM_DAILY_BUDGET_CENTS = int(os.getenv("LLM_DAILY_BUDGET_CENTS", "500"))
+EMAIL_DAILY_BUDGET_CENTS = int(os.getenv("EMAIL_DAILY_BUDGET_CENTS", "0"))
+SMS_DAILY_BUDGET_CENTS   = int(os.getenv("SMS_DAILY_BUDGET_CENTS", "0"))
+VOICE_DAILY_BUDGET_CENTS = int(os.getenv("VOICE_DAILY_BUDGET_CENTS", "0"))
 
 # ----------------------------
 # Exceptions & atomic checks
@@ -215,3 +226,11 @@ def _next_allowed_time(now: datetime, start: time, end: time) -> datetime:
             target_day = today if cur_t <= end else (today + timedelta(days=1))
             return datetime.combine(target_day, end) + timedelta(minutes=1)
         return now
+
+__all__ = [
+    "LLM_DAILY_BUDGET_CENTS",
+    "EMAIL_DAILY_BUDGET_CENTS",
+    "SMS_DAILY_BUDGET_CENTS",
+    "VOICE_DAILY_BUDGET_CENTS",
+    "CONFIDENCE_THRESHOLD",
+]

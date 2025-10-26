@@ -1,144 +1,101 @@
-﻿from temporalio import activity
+﻿# app/orchestrator/temporal/activities/sms_send.py
+from temporalio import activity
 from typing import Dict, Any
-from app.channels.providers.sms import send_sms_via_slicktext
-
-@activity.defn(name="sms_send")
-async def sms_send(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """SMS send activity — delegates to SlickText adapter."""
-    request = {"enrollment_id": enrollment_id, **payload}
-    return await send_sms_via_slicktext(request)
-
 import logging
-
 from app.channels.providers import sms as sms_client
 from app.data import supabase_repo as repo
 from app.policy.guards import evaluate_policy_guards
 from app.policy.guards_budget import evaluate_budget_caps
-from app.data.telemetry import log_decision_to_audit  # optional audit hook
-from app.data.db import supabase  # preferred asyncpg accessor
+from app.data.telemetry import log_decision_to_audit
+from app.data.db import supabase  # async supabase accessor
 
 logger = logging.getLogger(__name__)
-
 
 @activity.defn(name="sms_send")
 async def sms_send(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Send an SMS message through the configured provider,
-    enforcing quiet hours, consent, frequency, and budget/rate caps.
+    Temporal activity: send an SMS message via Cory's configured provider.
+    Integrates policy guards, budget caps, idempotency, and audit logging.
 
-    payload example:
-    {
-        "lead": {...},
-        "organization": {...},
+    payload = {
         "to": "+15551234567",
         "body": "Hi there!",
-        "idempotency_key": "optional-key",
-        "campaign_id": "CAMP123"
+        "lead": {...},
+        "organization": {...},
+        "campaign_id": "CAMP123",
+        "idempotency_key": "optional-key"
     }
     """
+    activity.logger.info(f"📨 [SMS_SEND] Starting send for enrollment={enrollment_id}")
+
     channel = "sms"
     lead = payload.get("lead", {})
     org = payload.get("organization", {})
     campaign_id = payload.get("campaign_id")
 
-    # --- Acquire DB connection or pool -------------------------------------
-    db = supabase
-
-    # --- Policy Guard Check (C2.1) -----------------------------------------
-    allowed, reason = await evaluate_policy_guards(db, lead, org, channel)
+    # --- Policy Guard (quiet hours, consent, etc.) ---
+    allowed, reason = await evaluate_policy_guards(supabase, lead, org, channel)
     if not allowed:
-        logger.info(
-            "SendBlockedPolicy",
-            extra={
-                "enrollment_id": enrollment_id,
-                "lead_id": lead.get("id"),
-                "channel": channel,
-                "reason": reason,
-            },
-        )
+        activity.logger.info(f"🚫 Policy blocked SMS: {reason}")
         await log_decision_to_audit(lead.get("id"), channel, reason)
         return {
             "channel": channel,
             "enrollment_id": enrollment_id,
             "status": "blocked",
-            "reason": reason,
             "stage": "policy_guard",
+            "reason": reason,
             "request": payload,
         }
 
-    # --- Budget / Rate Cap Check (C2.2) ------------------------------------
+    # --- Budget / Rate Cap Check ---
     allowed, reason, hint = await evaluate_budget_caps(
-        db=db,
-        campaign_id=campaign_id,
-        channel=channel,
-        policy=org.get("policy", {}),
+        db=supabase, campaign_id=campaign_id, channel=channel, policy=org.get("policy", {})
     )
     if not allowed:
-        logger.info(
-            "SendBlockedBudget",
-            extra={
-                "enrollment_id": enrollment_id,
-                "campaign_id": campaign_id,
-                "channel": channel,
-                "reason": reason,
-                "hint": hint,
-            },
-        )
+        activity.logger.info(f"💸 Budget guard blocked SMS: {reason}")
         await log_decision_to_audit(lead.get("id"), channel, reason)
         return {
             "channel": channel,
             "enrollment_id": enrollment_id,
-            "campaign_id": campaign_id,
             "status": "blocked",
+            "stage": "budget_guard",
             "reason": reason,
             "hint": hint,
-            "stage": "budget_guard",
             "request": payload,
         }
 
-    # --- Provider Send ------------------------------------------------------
+    # --- Provider Send ---
     try:
-        ref = await sms_client.send(
-            to=payload["to"],
-            body=payload["body"],
+        to = payload["to"]
+        body = payload["body"]
+
+        activity.logger.info(f"📤 Sending SMS to {to}: {body[:80]}")
+        provider_ref = await sms_client.send(
+            to=to,
+            body=body,
             idempotency_key=payload.get("idempotency_key"),
         )
 
-        # Optional: log outbound message
+        # Log outbound record in Supabase
         try:
-            await repo.log_outbound(
-                enrollment_id=enrollment_id,
-                channel=channel,
-                provider_ref=ref,
-            )
-        except Exception as log_ex:
-            logger.warning("OutboundLogFailed", extra={"error": str(log_ex)})
+            await repo.log_outbound(enrollment_id, channel, provider_ref)
+        except Exception as ex:
+            activity.logger.warning(f"⚠️ Failed to log outbound SMS: {ex}")
 
-        logger.info(
-            "SMSDispatched",
-            extra={
-                "enrollment_id": enrollment_id,
-                "lead_id": lead.get("id"),
-                "provider_ref": ref,
-                "status": "sent",
-            },
+        activity.logger.info(
+            f"✅ SMS dispatched successfully | to={to} ref={provider_ref}"
         )
         return {
             "channel": channel,
             "enrollment_id": enrollment_id,
-            "provider_ref": ref,
+            "provider_ref": provider_ref,
             "status": "sent",
             "request": payload,
         }
 
     except Exception as e:
-        logger.error(
-            "SMSError",
-            extra={
-                "enrollment_id": enrollment_id,
-                "lead_id": lead.get("id"),
-                "error": str(e),
-            },
+        activity.logger.error(
+            f"❌ SMS send failed | enrollment={enrollment_id} error={e}",
             exc_info=True,
         )
         return {

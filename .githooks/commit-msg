@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+MSG_FILE="$1"
+TRACE="${TRACE_ID:-}"
+[ -z "$TRACE" ] && [ -f ".trace_id" ] && TRACE="$(cat .trace_id 2>/dev/null || true)"
+if [ -n "$TRACE" ] && ! grep -i -q "^[[:space:]]*trace:" "$MSG_FILE"; then
+  {
+    echo ""
+    echo "trace: $TRACE"
+  } >> "$MSG_FILE"
+fi
