@@ -232,6 +232,22 @@ async def run() -> None:
         await asyncio.gather(*worker_tasks, return_exceptions=True)
         log.info("✅ All workers stopped cleanly.")
 
+# --------------------------------------------------------------------------
+# Activity Overrides (Dev Simulation Mode)
+# --------------------------------------------------------------------------
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+MOCK_COMMUNICATION = os.getenv("MOCK_COMMUNICATION", "false").lower() == "true"
+
+if ENVIRONMENT in ("local", "development", "test") or MOCK_COMMUNICATION:
+    log.warning("🧪 Running in DEV SIMULATION MODE — using mock communication activities")
+    try:
+        from app.orchestrator.temporal.activities.sms_send_dev import sms_send as sms_send
+        from app.orchestrator.temporal.activities.email_send_dev import email_send as email_send
+        from app.orchestrator.temporal.activities.voice_start_dev import voice_start as voice_start
+    except ImportError as e:
+        log.error(f"⚠️ Failed to import mock activities: {e}")
+else:
+    log.info("📡 Using live communication providers for SMS, Email, and Voice.")
 
 # --------------------------------------------------------------------------
 def main() -> None:
