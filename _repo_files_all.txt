@@ -58,7 +58,10 @@ app\orchestrator\temporal
 app\orchestrator\temporal\__init__.py
 app\orchestrator\temporal\activities
 app\orchestrator\temporal\activities\__init__.py
+app\orchestrator\temporal\activities\call_attempt.py
 app\orchestrator\temporal\activities\email_send.py
+app\orchestrator\temporal\activities\email_send_dev.py
+app\orchestrator\temporal\activities\escalate_to_human.py
 app\orchestrator\temporal\activities\handoff_create.py
 app\orchestrator\temporal\activities\interactions_log.py
 app\orchestrator\temporal\activities\program_match.py
@@ -68,7 +71,9 @@ app\orchestrator\temporal\activities\rag_redact.py
 app\orchestrator\temporal\activities\rag_retrieve.py
 app\orchestrator\temporal\activities\rag_route.py
 app\orchestrator\temporal\activities\sms_send.py
+app\orchestrator\temporal\activities\sms_send_dev.py
 app\orchestrator\temporal\activities\voice_start.py
+app\orchestrator\temporal\activities\voice_start_dev.py
 app\orchestrator\temporal\common
 app\orchestrator\temporal\common\__init__.py
 app\orchestrator\temporal\common\attempts.py
@@ -84,12 +89,15 @@ app\orchestrator\temporal\worker.py
 app\orchestrator\temporal\worker_rag.py
 app\orchestrator\temporal\workflows
 app\orchestrator\temporal\workflows\__init__.py
+app\orchestrator\temporal\workflows\admissions_outreach.py
 app\orchestrator\temporal\workflows\answer_builder.py
 app\orchestrator\temporal\workflows\campaign.py
 app\orchestrator\temporal\workflows\doc_ingest_cron.py
 app\orchestrator\temporal\workflows\handoff.py
 app\orchestrator\temporal\workflows\program_match.py
 app\orchestrator\temporal\workflows\rag_answer.py
+app\orchestrator\temporal\workflows\simulated_followup.py
+app\orchestrator\temporal\workflows\workflow_registry.py
 app\policy
 app\policy\__init__.py
 app\policy\guards.py
@@ -100,6 +108,8 @@ app\repo\dtos.py
 app\repo\handoff_repo.py
 app\repo\README.md
 app\repo\supabase_repo.py
+app\utils
+app\utils\supabase_client.py
 app\web
 app\web\__init__.py
 app\web\email_webhook.py
@@ -119,6 +129,7 @@ app\web\webhook.py
 backups
 backups\cory_backup.dump
 backups\cory_backup_20251014_151120.dump
+current_workflow.json
 db_connection_test.py
 diagram
 diagram\channel-execution.dot
@@ -146,17 +157,24 @@ requirements-dev.txt
 scripts
 scripts\generate_openapi_examples.py
 scripts\quick_db_check.py
+scripts\respond_live.py
 scripts\run_ingest_once.py
 scripts\seed_embeddings.py
+scripts\send_signal_manual.py
+scripts\simulated_followup.py
 scripts\start_answer_builder.py
 scripts\start_program_match.py
+scripts\start_sim_followup.py
 scripts\terminate_match.py
+scripts\test_outreach_mock.py
+scripts\test_outreach_signal_interrupt.py
 seeding
 seeding\__init__.py
 seeding\1.unique_indexes.sql
 seeding\2.seed_organization.sql
 seeding\B2.2 SEED.sql
 seeding\c5.1.sql
+seeding\c5.2c_sedding.sql
 seeding\seed_minimal.py
 sql
 sql tests
@@ -177,6 +195,8 @@ sql\migrations\c4.1.sql
 sql\migrations\c5.1.sql
 sql\migrations\c5.2b.sql
 sql\migrations\c5.2c.sql
+sql\migrations\c5.2cc_new.sql
+sql\migrations\c5.2security.sql
 sql\migrations\README.MD
 sql\migrations\v_variant_attribution.sql
 sql\ops
