@@ -106,6 +106,19 @@ CREATE TABLE public.contact (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- ==========================================================
+-- 🔧 CONTACT TABLE SCHEMA UPGRADE
+-- Adds fields for personalization, outreach, and lead info
+-- ==========================================================
+
+ALTER TABLE public.contact
+ADD COLUMN IF NOT EXISTS first_name text,
+ADD COLUMN IF NOT EXISTS last_name text,
+ADD COLUMN IF NOT EXISTS field_of_study text,
+ADD COLUMN IF NOT EXISTS level_of_interest text DEFAULT 'unknown',  -- e.g. high | medium | low | unknown
+ADD COLUMN IF NOT EXISTS source text,                                -- e.g. webinar, landing_page, referral
+ADD COLUMN IF NOT EXISTS last_interaction_at timestamptz DEFAULT now();
+
 CREATE TABLE public.enrollment (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid REFERENCES public.project(id),
@@ -333,4 +346,37 @@ CREATE TABLE IF NOT EXISTS public.reengagement_campaigns (
   updated_at timestamptz DEFAULT NOW()
 );
 
+-- 🔹 Add unique and check constraints where logical
+ALTER TABLE public.organizations
+  ADD CONSTRAINT uq_organizations_slug UNIQUE (slug);
+
+ALTER TABLE public.campaigns
+  ADD CONSTRAINT uq_campaigns_name_per_org UNIQUE (organization_id, name);
+
+ALTER TABLE public.contact
+  ADD CONSTRAINT uq_contact_project_phone UNIQUE (project_id, phone);
+
+ALTER TABLE public.enrollment
+  ADD CONSTRAINT uq_enrollment_contact_campaign UNIQUE (contact_id, campaign_id);
+
+ALTER TABLE public.organization_integrations
+DROP CONSTRAINT IF EXISTS organization_integrations_integration_type_check;
+
+ALTER TABLE public.organization_integrations
+ADD CONSTRAINT organization_integrations_integration_type_check
+CHECK (
+  integration_type IN ('mandrill', 'slicktext', 'synthflow')
+);
+
+ALTER TABLE public.users
+DROP CONSTRAINT IF EXISTS users_role_check;
+
+ALTER TABLE public.users
+ADD CONSTRAINT users_role_check
+CHECK (
+  role IN ('owner', 'admin', 'advisor', 'manager', 'agent', 'viewer')
+);
+
 COMMIT;
+
+
