@@ -1,0 +1,100 @@
+digraph CoryDB {
+  rankdir=LR;
+  fontsize=11;
+  fontname="Inter,Arial";
+  node [shape=box, style="rounded,filled", fontname="Inter,Arial", color="#555", fontsize=10];
+  edge [color="#666", fontname="Inter,Arial", fontsize=9];
+
+  /* ==========================================================
+     🟧 TENANT & ORGANIZATION STRUCTURE
+     ========================================================== */
+  subgraph cluster_org {
+    label="Tenant & Organization Structure";
+    color="#FBC02D";
+    style="filled,rounded";
+    fillcolor="#FFF9C4";
+
+    TENANT [label="TENANT\nid (uuid)\nname (text)\ncreated_at", fillcolor="#FFF59D"];
+    PROJECT [label="PROJECT\nid (uuid)\nname (text)\ntenant_id (uuid FK)\ncreated_at", fillcolor="#FFF59D"];
+    ORGANIZATIONS [label="ORGANIZATIONS\nid (uuid)\nname (text)\nslug\nphone\ntimezone\nwebsite", fillcolor="#FFF59D"];
+    USERS [label="USERS\nid (uuid)\norganization_id (uuid FK)\nemail\nrole\nis_active", fillcolor="#FFF59D"];
+    ORG_SETTINGS [label="ORGANIZATION_SETTINGS\norganization_id (FK)\nsetting_key\nsetting_value", fillcolor="#FFF59D"];
+    ORG_INTEGRATIONS [label="ORGANIZATION_INTEGRATIONS\norganization_id (FK)\nintegration_name\nintegration_type", fillcolor="#FFF59D"];
+  }
+
+  /* ==========================================================
+     🟦 CORE ENTITIES
+     ========================================================== */
+  subgraph cluster_core {
+    label="Core Entities";
+    color="#64B5F6";
+    style="filled,rounded";
+    fillcolor="#E3F2FD";
+
+    CAMPAIGNS [label="CAMPAIGNS\nid (uuid)\norganization_id (FK)\nname\nis_active", fillcolor="#BBDEFB"];
+    CONTACT [label="CONTACT\nid (uuid)\nproject_id (FK)\nname/email/phone", fillcolor="#BBDEFB"];
+    ENROLLMENT [label="ENROLLMENT\nid (uuid)\nproject_id (FK)\ncampaign_id (FK)\ncontact_id (FK)\nstatus", fillcolor="#BBDEFB"];
+  }
+
+  /* ==========================================================
+     🟪 COMMUNICATION ENTITIES
+     ========================================================== */
+  subgraph cluster_comm {
+    label="Communication Entities";
+    color="#CE93D8";
+    style="filled,rounded";
+    fillcolor="#F3E5F5";
+
+    MESSAGE [label="MESSAGE\nenrollment_id (FK)\nchannel\ndirection", fillcolor="#E1BEE7"];
+    EVENT [label="EVENT\nenrollment_id (FK)\nevent_type\ndirection", fillcolor="#E1BEE7"];
+    OUTCOME [label="OUTCOME\nenrollment_id (FK)\nkind\nvalue", fillcolor="#E1BEE7"];
+    HANDOFF [label="HANDOFF\nenrollment_id (FK)\nstatus\nassignee", fillcolor="#E1BEE7"];
+  }
+
+  /* ==========================================================
+     🟩 TEMPLATES & CAMPAIGN ASSETS
+     ========================================================== */
+  subgraph cluster_assets {
+    label="Templates & Campaign Assets";
+    color="#81C784";
+    style="filled,rounded";
+    fillcolor="#E8F5E9";
+
+    TEMPLATE [label="TEMPLATE\nid (uuid)\nproject_id (FK)\nname\nchannel", fillcolor="#C8E6C9"];
+    TEMPLATE_VARIANT [label="TEMPLATE_VARIANT\ntemplate_id (FK)\nname\nweight", fillcolor="#C8E6C9"];
+    LEAD_STEPS [label="LEAD_CAMPAIGN_STEPS\nregistration_id (FK)\nstep_name\nstep_type", fillcolor="#C8E6C9"];
+    APPOINTMENTS [label="APPOINTMENTS\nproject_id (FK)\ncampaign_id (FK)\nscheduled_for", fillcolor="#C8E6C9"];
+    NURTURE [label="NURTURE_CAMPAIGNS\norganization_id (FK)\nname\ngoal", fillcolor="#C8E6C9"];
+    REENGAGEMENT [label="REENGAGEMENT_CAMPAIGNS\norganization_id (FK)\nname\ntrigger_condition", fillcolor="#C8E6C9"];
+  }
+
+  /* ==========================================================
+     RELATIONSHIPS (Edges)
+     ========================================================== */
+  TENANT -> PROJECT [label="owns"];
+  PROJECT -> CONTACT [label="collects"];
+  PROJECT -> ENROLLMENT [label="tracks"];
+
+  ORGANIZATIONS -> USERS [label="has"];
+  ORGANIZATIONS -> CAMPAIGNS [label="runs"];
+  ORGANIZATIONS -> ORG_SETTINGS [label="configures"];
+  ORGANIZATIONS -> ORG_INTEGRATIONS [label="integrates"];
+  ORGANIZATIONS -> NURTURE [label="owns"];
+  ORGANIZATIONS -> REENGAGEMENT [label="owns"];
+
+  CAMPAIGNS -> ENROLLMENT [label="assigned"];
+  CONTACT -> ENROLLMENT [label="participates"];
+  ENROLLMENT -> MESSAGE [label="triggers"];
+  ENROLLMENT -> EVENT [label="records"];
+  ENROLLMENT -> OUTCOME [label="produces"];
+  ENROLLMENT -> HANDOFF [label="escalates"];
+  ENROLLMENT -> LEAD_STEPS [label="progresses"];
+
+  TEMPLATE -> TEMPLATE_VARIANT [label="has"];
+  CAMPAIGNS -> APPOINTMENTS [label="schedules"];
+
+  /* Optional rank alignment */
+  {rank=same; TENANT; PROJECT; ORGANIZATIONS;}
+  {rank=same; CAMPAIGNS; CONTACT; ENROLLMENT;}
+  {rank=same; MESSAGE; EVENT; OUTCOME; HANDOFF;}
+}

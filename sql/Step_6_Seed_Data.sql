@@ -326,4 +326,79 @@ VALUES (
 )
 ON CONFLICT DO NOTHING;
 
+-- ==========================================================
+-- 🌱 CONTACT TABLE MOCK DATA SEED
+-- ==========================================================
+
+INSERT INTO public.contact (
+  id, project_id, email, phone, consent,
+  first_name, last_name, field_of_study, level_of_interest, source, created_at
+)
+VALUES
+  (
+    '66333333-3333-3333-3333-333333333333',
+    '22222222-2222-2222-2222-222222222222',
+    'casey@example.com',
+    '+15555550100',
+    TRUE,
+    'Casey',
+    'Rivera',
+    'Computer Science',
+    'high',
+    'open_house',
+    NOW()
+  ),
+  (
+    'add9c491-d745-4d34-843f-114b780a5f56',
+    'ca14489b-79f2-4485-aa3a-de8d4a333b58',
+    'b22_30b39c35_deliv@example.com',
+    '+15555550200',
+    TRUE,
+    'Jordan',
+    'Kim',
+    'Marketing',
+    'medium',
+    'website_form',
+    NOW()
+  ),
+  (
+    'ac3a61a9-055c-48af-b79f-0c56883c0410',
+    'ca14489b-79f2-4485-aa3a-de8d4a333b58',
+    'b22_30b39c35_policy@example.com',
+    '+15555550300',
+    TRUE,
+    'Taylor',
+    'Nguyen',
+    'Business Administration',
+    'low',
+    'email_campaign',
+    NOW()
+  ),
+  (
+    '9876a678-aee5-4f50-8b68-829d49b244f1',
+    'ca14489b-79f2-4485-aa3a-de8d4a333b58',
+    'b22_30b39c35_timeout@example.com',
+    '+15555550400',
+    TRUE,
+    'Morgan',
+    'Lee',
+    'Engineering',
+    'medium',
+    'referral',
+    NOW()
+  ),
+  (
+    '7dd5b85d-ff4e-4b13-8940-aad6871ffe8f',
+    'ca14489b-79f2-4485-aa3a-de8d4a333b58',
+    'b22_30b39c35_failed@example.com',
+    '+15555550500',
+    TRUE,
+    'Sam',
+    'Patel',
+    'Biology',
+    'low',
+    'social_media',
+    NOW()
+  );
+
 COMMIT;

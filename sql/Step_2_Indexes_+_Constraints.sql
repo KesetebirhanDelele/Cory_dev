@@ -10,6 +10,11 @@ CREATE INDEX idx_campaigns_name             ON public.campaigns(name);
 CREATE INDEX idx_contacts_project           ON public.contact(project_id);
 CREATE INDEX idx_contacts_phone_email       ON public.contact(phone, email);
 
+-- Optional: Indexes for faster lookups
+CREATE INDEX IF NOT EXISTS idx_contact_first_name ON public.contact(first_name);
+CREATE INDEX IF NOT EXISTS idx_contact_email ON public.contact(email);
+CREATE INDEX IF NOT EXISTS idx_contact_project_id ON public.contact(project_id);
+
 CREATE INDEX idx_enrollment_project_campaign ON public.enrollment(project_id, campaign_id);
 CREATE INDEX idx_enrollment_contact          ON public.enrollment(contact_id);
 
