@@ -19,6 +19,8 @@ app\agents\__init__.py
 app\agents\agent_catalog.py
 app\agents\call_processing_agent.py
 app\agents\campaign_builder.py
+app\agents\campaign_message_agent.py
+app\agents\conversational_response_agent.py
 app\agents\enroll_agent.py
 app\channels
 app\channels\__init__.py
@@ -149,6 +151,7 @@ docs\agent_catalog.md
 docs\error_taxonomy.md
 docs\signal_contract.md
 docs\state_snapshot_mapping.md
+dot
 GitCommands.MD
 pytest.ini
 README.md
@@ -166,6 +169,8 @@ scripts\start_answer_builder.py
 scripts\start_program_match.py
 scripts\start_sim_followup.py
 scripts\terminate_match.py
+scripts\test_campaign_message.py
+scripts\test_conversational_response_agent.py
 scripts\test_outreach_mock.py
 scripts\test_outreach_signal_interrupt.py
 seeding
@@ -180,8 +185,8 @@ sql
 sql tests
 sql tests\test_plan.py
 sql tests\test_workflows.py
-sql\clean_seed_data.sql
-sql\inventory_SQL_pack.sql
+sql\cory_database.dot
+sql\cory_schema.md
 sql\migrations
 sql\migrations\001_core_schema.sql
 sql\migrations\0012_b2_1_telemetry_view.sql
@@ -197,7 +202,13 @@ sql\migrations\c5.2b.sql
 sql\migrations\c5.2c.sql
 sql\migrations\c5.2cc_new.sql
 sql\migrations\c5.2security.sql
+sql\migrations\c5.3_move_dev_nexus_to_public.sql
+sql\migrations\c6_0_lead_lifecycle.sql
+sql\migrations\c6_1_create_lifecycle_base_tables.sql
+sql\migrations\clean_seed_data.sql
+sql\migrations\inventory_SQL_pack.sql
 sql\migrations\README.MD
+sql\migrations\seed_all.sql
 sql\migrations\v_variant_attribution.sql
 sql\ops
 sql\ops\backup.ps1
@@ -205,12 +216,21 @@ sql\ops\ReadMe.md
 sql\ops\restore-dryrun.ps1
 sql\ops\table_fingerprint.sql
 sql\ops\verify.ps1
-sql\seed_all.sql
+sql\Step_0_cory_database_inventory_check.sql
+sql\Step_1. Clean.sql
+sql\Step_1_rebuild_cory_db.sql
+sql\Step_2_Indexes_+_Constraints.sql
+sql\Step_3_RLS_and_Policies.sql
+sql\Step_4_Triggers_+_Functions.sql
+sql\Step_5_Views.sql
+sql\Step_6.1_test_queries.sql
+sql\Step_6_Seed_Data.sql
 system-flow.dot
 system-flow.svg
 test_db_connection.py
 tests
 tests\__init__.py
+tests\agents
 tests\conftest.py
 tests\docs
 tests\docs\test_agent_catalog.py

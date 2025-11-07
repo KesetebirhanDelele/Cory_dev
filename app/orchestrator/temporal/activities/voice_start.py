@@ -1,9 +1,10 @@
-﻿from temporalio import activity
+﻿# app/orchestrator/temporal/activities/voice_start.py
+from temporalio import activity
 from typing import Dict, Any
 import logging
 
-from app.channels.providers import voice as voice_client
-from app.data import supabase_repo as repo
+from app.agents.voice_conversation_agent import VoiceConversationAgent
+from app.data.supabase_repo import SupabaseRepo
 from app.policy.guards import evaluate_policy_guards
 from app.policy.guards_budget import evaluate_budget_caps
 from app.data.telemetry import log_decision_to_audit
@@ -15,28 +16,24 @@ logger = logging.getLogger(__name__)
 @activity.defn(name="voice_start")
 async def voice_start(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Start an outbound Synthflow call (voice channel).
-    Applies quiet hours, consent, frequency, and budget/rate caps pre-send.
+    Start an outbound or simulated voice conversation via Synthflow.
 
-    payload example:
-    {
-        "lead": {...},
-        "organization": {...},
-        "to": "+15551234567",
-        "agent_id": "voice_agent_001",
-        "context": {"program": "nursing"},
-        "campaign_id": "CAMP123"
-    }
+    Handles policy and budget guards, runs the call through VoiceConversationAgent,
+    captures transcript + intent classification, and updates Supabase.
     """
+
     channel = "voice"
     lead = payload.get("lead", {})
     org = payload.get("organization", {})
     campaign_id = payload.get("campaign_id")
+    simulate = payload.get("simulate", False)
+    to = payload.get("to")
 
-    # --- Acquire DB connection ---------------------------------------------
+    # --- Acquire DB / Repo --------------------------------------------------
     db = supabase
+    supabase_repo = SupabaseRepo(db)
 
-    # --- Policy Guard Check (C2.1) -----------------------------------------
+    # --- Policy Guard Check -------------------------------------------------
     allowed, reason = await evaluate_policy_guards(db, lead, org, channel)
     if not allowed:
         logger.info(
@@ -58,7 +55,7 @@ async def voice_start(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, 
             "request": payload,
         }
 
-    # --- Budget / Rate Cap Check (C2.2) ------------------------------------
+    # --- Budget / Rate Cap Check -------------------------------------------
     allowed, reason, hint = await evaluate_budget_caps(
         db=db,
         campaign_id=campaign_id,
@@ -88,38 +85,37 @@ async def voice_start(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, 
             "request": payload,
         }
 
-    # --- Provider Send ------------------------------------------------------
+    # --- Execute Voice Conversation ----------------------------------------
     try:
-        ref = await voice_client.start_call(
-            to=payload["to"],
-            agent_id=payload["agent_id"],
-            context=payload.get("context", {}),
+        agent = VoiceConversationAgent(supabase_repo)
+        result = await agent.start_call(
+            org_id=org.get("id"),
+            enrollment_id=enrollment_id,
+            phone=to,
+            lead_id=lead.get("id"),
+            campaign_step_id=payload.get("campaign_step_id"),
+            vars=payload.get("context", {}),
+            simulate=simulate,
         )
 
-        # Optional: log outbound call for telemetry/audit
-        try:
-            await repo.log_outbound(
-                enrollment_id=enrollment_id,
-                channel=channel,
-                provider_ref=ref,
-            )
-        except Exception as log_ex:
-            logger.warning("OutboundLogFailed", extra={"error": str(log_ex)})
-
+        # Combine result and return structured data
         logger.info(
-            "VoiceDispatched",
+            "VoiceConversationCompleted",
             extra={
                 "enrollment_id": enrollment_id,
                 "lead_id": lead.get("id"),
-                "provider_ref": ref,
-                "status": "sent",
+                "intent": result.get("intent"),
+                "next_action": result.get("next_action"),
             },
         )
         return {
             "channel": channel,
             "enrollment_id": enrollment_id,
-            "provider_ref": ref,
-            "status": "sent",
+            "lead_id": lead.get("id"),
+            "intent": result.get("intent"),
+            "next_action": result.get("next_action"),
+            "status": "completed",
+            "transcript_saved": True,
             "request": payload,
         }
 
@@ -136,6 +132,7 @@ async def voice_start(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, 
         return {
             "channel": channel,
             "enrollment_id": enrollment_id,
+            "lead_id": lead.get("id"),
             "status": "failed",
             "error": str(e),
             "request": payload,
