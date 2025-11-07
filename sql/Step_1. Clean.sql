@@ -229,6 +229,12 @@ CREATE TABLE public.lead_campaign_steps (
     created_at timestamptz DEFAULT now()
 );
 
+ALTER TABLE public.lead_campaign_steps
+ADD COLUMN intent text,
+ADD COLUMN next_action text,
+ADD COLUMN transcript text,
+ADD COLUMN updated_at timestamptz DEFAULT now();
+
 CREATE TABLE public.nurture_campaigns (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name text NOT NULL,
