@@ -1,52 +1,75 @@
 # app/web/voice_webhook.py
-from fastapi import APIRouter, Request, HTTPException, Header
-from datetime import datetime, timezone
-import hmac, hashlib, logging, os
-
-from app.web.schemas import WebhookEvent
+from fastapi import APIRouter, Request
+from supabase import create_client
+import os
+import datetime
+import json
+import logging
+from postgrest.exceptions import APIError
 
 router = APIRouter()
-logger = logging.getLogger("cory.voice_webhook")
+log = logging.getLogger("cory.voice.webhook")
 
-VOICE_WEBHOOK_SECRET = os.getenv("VOICE_WEBHOOK_SECRET", "dev-secret")
+# Initialize Supabase client
+supabase = create_client(
+    os.getenv("SUPABASE_URL"),
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+)
 
-def verify_hmac_signature(body_bytes: bytes, signature: str) -> bool:
-    mac = hmac.new(VOICE_WEBHOOK_SECRET.encode(), body_bytes, hashlib.sha256)
-    expected = mac.hexdigest()
-    return hmac.compare_digest(expected, signature)
+@router.post("/api/voice/transcript")
+async def receive_transcript(request: Request):
+    """
+    Webhook endpoint that receives a transcript payload from Synthflow (or another voice provider)
+    and logs it into the `message` table. Handles duplicate provider_ref gracefully.
+    """
 
-@router.post("/webhooks/voice")
-async def voice_webhook(request: Request, x_signature: str = Header(None)):
-    # Read raw body for signature verification
-    body_bytes = await request.body()
-    if not x_signature or not verify_hmac_signature(body_bytes, x_signature):
-        raise HTTPException(status_code=401, detail="Invalid signature")
-
-    # Parse payload
-    payload = await request.json()
-    provider_ref = (
-        payload.get("provider_ref")
-        or payload.get("call_id")
-        or payload.get("sid")
-    )
+    data = await request.json()
+    provider_ref = data.get("call_id")
+    transcript = data.get("transcript_text", "")
+    enrollment_id = data.get("metadata", {}).get("enrollment_id")
+    project_id = data.get("metadata", {}).get("project_id")
+    audio_url = data.get("audio_url")
 
     if not provider_ref:
-        raise HTTPException(status_code=422, detail="Missing provider_ref")
+        return {"error": "Missing call_id"}, 400
 
-    # Idempotency check
-    if not await request.app.state.idempotency.reserve(provider_ref):
-        logger.info("Duplicate voice webhook ignored", extra={"provider_ref": provider_ref})
-        return {"status": "duplicate", "provider_ref": provider_ref, "data": payload}
+    content = {
+        "transcript": transcript,
+        "audio_url": audio_url,
+        "raw_payload": data
+    }
 
-    # Normalize into canonical model
-    event = WebhookEvent(
-        event="voice_incoming",
-        channel="voice",
-        timestamp=datetime.now(timezone.utc),
-        payload=payload,
-        metadata={"provider_ref": provider_ref},
-    )
+    now = datetime.datetime.now(datetime.UTC).isoformat()
 
-    await request.app.state.process_event_fn("voice", event)
+    record = {
+        "project_id": project_id or os.getenv("DEFAULT_PROJECT_ID"),
+        "enrollment_id": enrollment_id,
+        "channel": "voice",
+        "direction": "inbound",
+        "provider_ref": provider_ref,
+        "status": "complete",
+        "content": json.dumps(content),
+        "occurred_at": now,
+        "created_at": now
+    }
 
-    return {"status": "received", "provider_ref": provider_ref, "data": payload}
+    try:
+        response = supabase.table("message").insert(record).execute()
+        return {"success": True, "provider_ref": provider_ref}
+
+    except APIError as e:
+        # Handle duplicate constraint gracefully
+        if "duplicate key value violates unique constraint" in str(e):
+            log.warning(f"[Webhook] Duplicate provider_ref={provider_ref} ignored.")
+            return {
+                "success": True,
+                "provider_ref": provider_ref,
+                "duplicate": True
+            }
+
+        log.exception("[Webhook] Supabase API error: %s", e)
+        return {"error": str(e)}, 500
+
+    except Exception as ex:
+        log.exception("[Webhook] Unexpected error: %s", ex)
+        return {"error": str(ex)}, 500

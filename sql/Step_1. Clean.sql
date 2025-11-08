@@ -145,6 +145,10 @@ CREATE TABLE public.message (
     created_at timestamptz DEFAULT now()
 );
 
+ALTER TABLE public.message
+ADD COLUMN transcript text,
+ADD COLUMN audio_url text;
+
 CREATE TABLE public.event (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL REFERENCES public.project(id) ON DELETE CASCADE,

@@ -22,6 +22,7 @@ app\agents\campaign_builder.py
 app\agents\campaign_message_agent.py
 app\agents\conversational_response_agent.py
 app\agents\enroll_agent.py
+app\agents\voice_conversation_agent.py
 app\channels
 app\channels\__init__.py
 app\channels\mail_sender.py
@@ -173,6 +174,8 @@ scripts\test_campaign_message.py
 scripts\test_conversational_response_agent.py
 scripts\test_outreach_mock.py
 scripts\test_outreach_signal_interrupt.py
+scripts\test_voice_conversation_agent.py
+scripts\test_voice_conversation_agent_live.py
 seeding
 seeding\__init__.py
 seeding\1.unique_indexes.sql
@@ -280,3 +283,4 @@ tests\web\test_webhook_email.py
 tests\web\test_webhook_replay.py
 tests\web\test_webhook_voice.py
 tests\web\test_webhook_wa.py
+voice_calls.db

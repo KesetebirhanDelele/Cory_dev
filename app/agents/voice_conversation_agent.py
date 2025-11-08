@@ -1,4 +1,3 @@
-# app/agents/voice_conversation_agent.py
 """
 VoiceConversationAgent
 ----------------------------------------------------------
@@ -6,7 +5,7 @@ Facilitates AI-driven voice conversations for admissions outreach.
 
 Responsibilities:
 - Initiates or simulates voice calls (via Synthflow)
-- Collects or simulates transcripts
+- Collects or polls transcripts from `message` table
 - Uses ConversationalResponseAgent to classify and summarize outcomes
 - Persists transcript, intent, and next_action to Supabase
 - Triggers follow-up workflows for "ready_to_enroll" leads
@@ -14,7 +13,7 @@ Responsibilities:
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, Any
 
 from app.agents.conversational_response_agent import ConversationalResponseAgent
@@ -125,19 +124,26 @@ class VoiceConversationAgent:
         return classification
 
     # ------------------------------------------------------------------
-    # 🧠 Transcript Collection
+    # 🧠 Transcript Collection (via message table)
     # ------------------------------------------------------------------
     async def _collect_transcript(self, call_id: str, timeout: int = 60) -> str:
         """
-        Poll Supabase for transcript created via Synthflow webhook callbacks.
+        Poll Supabase `message` table for the transcript created via voice webhook.
         """
         log.info("⌛ Waiting for transcript from Synthflow for call_id=%s", call_id)
         for _ in range(timeout // 5):
             try:
-                transcript = await self.supabase.get_call_transcript(call_id)
-                if transcript:
-                    log.info("📝 Transcript retrieved for %s", call_id)
-                    return transcript
+                message = await self.supabase.get_message_by_provider_ref(call_id)
+                if message and message.get("status") == "complete":
+                    # Prefer explicit 'transcript' column if present, else JSON content
+                    transcript = message.get("transcript") or (
+                        message.get("content", {}).get("transcript")
+                        if isinstance(message.get("content"), dict)
+                        else None
+                    )
+                    if transcript:
+                        log.info("📝 Transcript retrieved for %s", call_id)
+                        return transcript
             except Exception as e:
                 log.warning("Error while fetching transcript: %s", e)
             await asyncio.sleep(5)
@@ -158,7 +164,7 @@ class VoiceConversationAgent:
                 "transcript": transcript,
                 "intent": classification.get("intent"),
                 "next_action": classification.get("next_action"),
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             }
             await self.supabase.update_lead_campaign_step(step_id, payload)
             log.info("🧾 Stored transcript + intent for step %s", step_id)
