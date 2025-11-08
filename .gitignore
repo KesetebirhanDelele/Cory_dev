@@ -2,7 +2,11 @@
 .testenv.env
 .testenv/
 __pycache__/
-tests\__pycache__/
+echo "__pycache__/" >> .gitignore
+echo "*.pyc" >> .gitignore
+app/__pycache__/
+app/channels/__pycache__/
+tests/__pycache__/
 *.pyc 
 # Environment files
 .env

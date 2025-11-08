@@ -139,17 +139,20 @@ class SupabaseRepo:
         print(f"[SupabaseRepo] upsert_call_event response: {r.status_code}")
         return r
 
-    async def get_call_transcript(self, call_id: str) -> str:
-        """Fetch transcript text for a given Synthflow call."""
+    async def get_message_by_provider_ref(self, provider_ref: str) -> dict:
+        """
+        Fetch a voice message record (and transcript) by provider_ref from the `message` table.
+        This replaces the old get_call_transcript() that queried lead_campaign_steps.
+        """
         url, key, schema = _cfg()
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(
-                f"{url}/rest/v1/lead_campaign_steps?provider_ref=eq.{call_id}&select=transcript",
+                f"{url}/rest/v1/message?provider_ref=eq.{provider_ref}&select=content,transcript,status",
                 headers={**_headers(key), "Accept-Profile": schema},
             )
         if r.status_code == 200 and r.json():
-            return r.json()[0].get("transcript", "")
-        return ""
+            return r.json()[0]
+        return {}
 
     async def update_lead_campaign_step(self, step_id: str, fields: dict):
         """Patch lead_campaign_steps by id (step_id)."""
