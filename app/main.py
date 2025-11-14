@@ -11,7 +11,11 @@ from typing import Callable, Optional
 from fastapi import FastAPI
 from app.web.webhook import router as webhook_router
 
+from app.web.voice_callback import router as voice_callback_router
+
+
 app = FastAPI(title="Cory API")
+app.include_router(voice_callback_router)
 
 # Mount the webhook routes
 app.include_router(webhook_router)

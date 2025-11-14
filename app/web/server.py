@@ -28,6 +28,7 @@ from app.web.voice_webhook import router as voice_router
 from app.web.wa_webhook import router as wa_router
 from app.web.routes_handoffs import router as handoffs_router
 from app.web.routes_kpi import router as kpi_router
+from app.web import metrics
 
 # ✅ Temporal bridge (must be imported after .env load)
 from app.orchestrator.temporal.signal_bridge import send_temporal_signal
