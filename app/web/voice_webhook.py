@@ -19,57 +19,61 @@ supabase = create_client(
 @router.post("/api/voice/transcript")
 async def receive_transcript(request: Request):
     """
-    Webhook endpoint that receives a transcript payload from Synthflow (or another voice provider)
-    and logs it into the `message` table. Handles duplicate provider_ref gracefully.
+    Webhook endpoint that receives a transcript payload from Synthflow
+    and logs it into the `message` table.
     """
-
     data = await request.json()
-    provider_ref = data.get("call_id")
-    transcript = data.get("transcript_text", "")
-    enrollment_id = data.get("metadata", {}).get("enrollment_id")
-    project_id = data.get("metadata", {}).get("project_id")
-    audio_url = data.get("audio_url")
+    log.info(f"[Webhook] Received payload from Synthflow: {json.dumps(data)[:500]}")
+
+    # ✅ Correctly unwrap Synthflow JSON structure
+    call = data.get("call", {})
+    provider_ref = call.get("call_id")
+    transcript = call.get("transcript", "")
+    audio_url = call.get("recording_url")
+
+    # Optional metadata
+    lead_name = data.get("lead", {}).get("name")
+    enrollment_id = None
+    if lead_name and lead_name.startswith("Enrollment-"):
+        enrollment_id = lead_name.replace("Enrollment-", "")
+
+    project_id = os.getenv("DEFAULT_PROJECT_ID")
 
     if not provider_ref:
+        log.warning(f"[Webhook] Missing call_id in Synthflow payload: {data.keys()}")
         return {"error": "Missing call_id"}, 400
 
     content = {
         "transcript": transcript,
         "audio_url": audio_url,
-        "raw_payload": data
+        "raw_payload": data,
     }
 
     now = datetime.datetime.now(datetime.UTC).isoformat()
-
     record = {
-        "project_id": project_id or os.getenv("DEFAULT_PROJECT_ID"),
+        "project_id": project_id,
         "enrollment_id": enrollment_id,
         "channel": "voice",
         "direction": "inbound",
         "provider_ref": provider_ref,
-        "status": "complete",
+        "status": data.get("status", "completed"),
         "content": json.dumps(content),
         "occurred_at": now,
-        "created_at": now
+        "created_at": now,
     }
 
     try:
-        response = supabase.table("message").insert(record).execute()
+        res = supabase.table("message").insert(record).execute()
+        log.info(f"✅ Stored voice transcript for call_id={provider_ref}")
         return {"success": True, "provider_ref": provider_ref}
 
     except APIError as e:
-        # Handle duplicate constraint gracefully
         if "duplicate key value violates unique constraint" in str(e):
             log.warning(f"[Webhook] Duplicate provider_ref={provider_ref} ignored.")
-            return {
-                "success": True,
-                "provider_ref": provider_ref,
-                "duplicate": True
-            }
-
-        log.exception("[Webhook] Supabase API error: %s", e)
+            return {"success": True, "duplicate": True, "provider_ref": provider_ref}
+        log.exception("[Webhook] Supabase API error")
         return {"error": str(e)}, 500
 
     except Exception as ex:
-        log.exception("[Webhook] Unexpected error: %s", ex)
+        log.exception("[Webhook] Unexpected error while inserting transcript")
         return {"error": str(ex)}, 500

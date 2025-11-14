@@ -147,6 +147,7 @@ pipx==1.7.1
 platformdirs==4.3.6
 postgrest==1.1.1
 posthog==3.7.4
+prometheus_client-0.23.1
 prompt_toolkit==3.0.50
 propcache==0.3.1
 prophet==1.1.6
