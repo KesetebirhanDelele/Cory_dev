@@ -1,12 +1,13 @@
 # app/data/supabase_repo.py
+
 from __future__ import annotations
+
 import os, json, httpx
 from typing import Optional, Dict, Any
 from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from temporalio import activity
 from supabase import create_client, Client
-
 
 # ===============================================================
 #  Configuration Helpers
@@ -108,9 +109,14 @@ async def patch(table: str, query: str, json_body: dict):
 class SupabaseRepo:
     """Repository for Supabase operations used by agents and callbacks."""
 
-    def __init__(self):
+    def __init__(self, client: Client | None = None) -> None:
+        """
+        Optional client arg is accepted for compatibility with tests and
+        older call sites (e.g., SupabaseRepo(db)).
+        """
         self.url, self.key, self.schema = _cfg()
-        self.client = get_client()
+        # Use injected client if provided (tests do this) or fall back to global client
+        self.client = client or get_client()
 
     # --- Voice / Transcript Methods ---------------------------------------
 
@@ -223,6 +229,6 @@ async def patch_activity(table: str, query: str, json_body: dict):
             r.raise_for_status()
 
         return {"status": r.status_code, "data": r.json()}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"[PATCH_ACTIVITY_EXCEPTION] {type(e).__name__}: {e}")
         raise

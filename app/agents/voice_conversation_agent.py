@@ -11,6 +11,8 @@ Responsibilities:
 - Triggers follow-up workflows for "ready_to_enroll" leads
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from datetime import datetime, UTC
@@ -30,7 +32,7 @@ class VoiceConversationAgent:
     for AI-driven classification and next-action inference.
     """
 
-    def __init__(self, supabase: SupabaseRepo):
+    def __init__(self, supabase: SupabaseRepo) -> None:
         self.supabase = supabase
         self.conv_agent = ConversationalResponseAgent()
 
@@ -49,6 +51,13 @@ class VoiceConversationAgent:
     ) -> Dict[str, Any]:
         """
         Starts a live or simulated voice conversation and classifies outcome.
+
+        Returns the classification dict from ConversationalResponseAgent, e.g.:
+            {
+                "intent": "ready_to_enroll" | "needs_more_info" | ...,
+                "next_action": "schedule_call" | "send_email" | ...,
+                ...
+            }
         """
         log.info("🎙️ VoiceConversationAgent starting for lead %s", lead_id)
 
@@ -60,16 +69,31 @@ class VoiceConversationAgent:
                 "lead: Hi, I’m still deciding about enrolling."
             )
         else:
+            transcript_text = ""
             try:
-                res = await send_voice_call(org_id, enrollment_id, phone, vars=vars or {})
+                res = await send_voice_call(
+                    org_id,
+                    enrollment_id,
+                    phone,
+                    vars=vars or {},
+                )
                 provider_ref = res.get("provider_ref")
                 log.info("📞 Live call initiated with provider_ref=%s", provider_ref)
-                transcript_text = await self._collect_transcript(provider_ref)
-            except Exception as e:
+                if provider_ref:
+                    transcript_text = await self._collect_transcript(provider_ref)
+                else:
+                    log.warning("⚠️ send_voice_call returned no provider_ref")
+            except Exception as e:  # noqa: BLE001
                 log.exception("❌ Failed to initiate Synthflow call: %s", e)
-                transcript_text = ""
 
         # --- 2️⃣ Classify conversation via ConversationalResponseAgent ---
+        if not transcript_text:
+            log.warning(
+                "⚠️ No transcript text available for lead %s, "
+                "classifying empty conversation",
+                lead_id,
+            )
+
         classification = await self.conv_agent.classify_message(transcript_text)
 
         # --- 3️⃣ Persist transcript + classification ---
@@ -97,26 +121,55 @@ class VoiceConversationAgent:
         Handles a campaign-generated voice message (from CampaignMessageGeneratorAgent),
         simulates or executes a call, then classifies conversation result.
         """
-        campaign_name = generated_msg["context"]["campaign"].get("name", "Admissions Campaign")
-        outbound_text = generated_msg.get("message_text", "Hello! This is Cory Admissions calling to follow up.")
-        log.info("📢 Initiating campaign-based voice call for %s (%s)", lead_id, campaign_name)
+        context = generated_msg.get("context", {}) or {}
+        campaign = context.get("campaign", {}) or {}
+
+        campaign_name = campaign.get("name", "Admissions Campaign")
+        outbound_text = generated_msg.get(
+            "message_text",
+            "Hello! This is Cory Admissions calling to follow up.",
+        )
+
+        log.info(
+            "📢 Initiating campaign-based voice call for lead %s (campaign=%s)",
+            lead_id,
+            campaign_name,
+        )
 
         if simulate:
-            transcript = f"agent: {outbound_text}\nlead: I'm interested, but not ready to enroll yet."
+            transcript = (
+                f"agent: {outbound_text}\n"
+                "lead: I'm interested, but not ready to enroll yet."
+            )
         else:
-            org_id = generated_msg["context"]["campaign"].get("organization_id", "org1")
+            org_id = campaign.get("organization_id", "org1")
             try:
-                res = await send_voice_call(org_id, enrollment_id, phone, vars={"script": outbound_text})
+                res = await send_voice_call(
+                    org_id,
+                    enrollment_id,
+                    phone,
+                    vars={"script": outbound_text},
+                )
                 provider_ref = res.get("provider_ref")
-                transcript = await self._collect_transcript(provider_ref)
-            except Exception as e:
-                log.exception("Synthflow voice call failed: %s", e)
-                transcript = f"agent: {outbound_text}\nlead: Sorry, I missed the call."
+                if provider_ref:
+                    transcript = await self._collect_transcript(provider_ref)
+                else:
+                    log.warning("⚠️ send_voice_call returned no provider_ref")
+                    transcript = (
+                        f"agent: {outbound_text}\n"
+                        "lead: Sorry, I missed the call."
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.exception("❌ Synthflow voice call failed: %s", e)
+                transcript = (
+                    f"agent: {outbound_text}\n"
+                    "lead: Sorry, I missed the call."
+                )
 
-        # Classify the final transcript
+        # --- 2️⃣ Classify the final transcript ---
         classification = await self.conv_agent.classify_message(transcript)
 
-        # Persist in Supabase
+        # --- 3️⃣ Persist in Supabase ---
         await self._persist_results(step_id, transcript, classification)
         await self._notify_workflow(lead_id, classification)
 
@@ -129,33 +182,53 @@ class VoiceConversationAgent:
     async def _collect_transcript(self, call_id: str, timeout: int = 60) -> str:
         """
         Poll Supabase `message` table for the transcript created via voice webhook.
+
+        We assume SupabaseRepo.get_message_by_provider_ref returns something like:
+            {
+                "status": "complete",
+                "transcript": "...",
+                "content": {"transcript": "...", ...},
+                ...
+            }
         """
         log.info("⌛ Waiting for transcript from Synthflow for call_id=%s", call_id)
-        for _ in range(timeout // 5):
+
+        # Poll every 5 seconds up to `timeout` seconds
+        for _ in range(max(1, timeout // 5)):
             try:
                 message = await self.supabase.get_message_by_provider_ref(call_id)
                 if message and message.get("status") == "complete":
                     # Prefer explicit 'transcript' column if present, else JSON content
-                    transcript = message.get("transcript") or (
-                        message.get("content", {}).get("transcript")
-                        if isinstance(message.get("content"), dict)
-                        else None
-                    )
+                    transcript: str | None = message.get("transcript")
+                    content = message.get("content")
+
+                    if not transcript and isinstance(content, dict):
+                        transcript = content.get("transcript")
+
                     if transcript:
-                        log.info("📝 Transcript retrieved for %s", call_id)
+                        log.info("📝 Transcript retrieved for call_id=%s", call_id)
                         return transcript
-            except Exception as e:
-                log.warning("Error while fetching transcript: %s", e)
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "⚠️ Error while fetching transcript for %s: %s",
+                    call_id,
+                    e,
+                )
+
             await asyncio.sleep(5)
-        log.warning("⚠️ Timeout waiting for transcript for %s", call_id)
+
+        log.warning("⚠️ Timeout waiting for transcript for call_id=%s", call_id)
         return ""
 
     # ------------------------------------------------------------------
     # 💾 Persistence
     # ------------------------------------------------------------------
     async def _persist_results(
-        self, step_id: str, transcript: str, classification: Dict[str, Any]
-    ):
+        self,
+        step_id: str,
+        transcript: str,
+        classification: Dict[str, Any],
+    ) -> None:
         """
         Save transcript + AI classification results to Supabase.
         """
@@ -168,13 +241,21 @@ class VoiceConversationAgent:
             }
             await self.supabase.update_lead_campaign_step(step_id, payload)
             log.info("🧾 Stored transcript + intent for step %s", step_id)
-        except Exception as e:
-            log.exception("❌ Failed to persist voice call results: %s", e)
+        except Exception as e:  # noqa: BLE001
+            log.exception(
+                "❌ Failed to persist voice call results for step %s: %s",
+                step_id,
+                e,
+            )
 
     # ------------------------------------------------------------------
     # 🔔 Workflow Notification
     # ------------------------------------------------------------------
-    async def _notify_workflow(self, lead_id: str, classification: Dict[str, Any]):
+    async def _notify_workflow(
+        self,
+        lead_id: str,
+        classification: Dict[str, Any],
+    ) -> None:
         """
         Trigger human follow-up or next automation step based on AI classification.
         """
@@ -182,10 +263,22 @@ class VoiceConversationAgent:
         next_action = classification.get("next_action")
 
         if intent == "ready_to_enroll":
-            log.info("📞 Lead %s ready to enroll → scheduling human appointment", lead_id)
+            log.info(
+                "📞 Lead %s ready to enroll → scheduling human appointment",
+                lead_id,
+            )
             try:
                 await self.supabase.create_appointment_task(lead_id)
-            except Exception as e:
-                log.warning("⚠️ Failed to create appointment task: %s", e)
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "⚠️ Failed to create appointment task for lead %s: %s",
+                    lead_id,
+                    e,
+                )
         else:
-            log.info("➡️ Lead %s classified as %s → next_action=%s", lead_id, intent, next_action)
+            log.info(
+                "➡️ Lead %s classified as %s → next_action=%s",
+                lead_id,
+                intent,
+                next_action,
+            )
