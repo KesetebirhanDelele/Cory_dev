@@ -1,3 +1,6 @@
+Run this code in Git Bash before Commit and Push:
+find . -type d -name "__pycache__" -exec rm -rf {} + ; find . -type f -name "*.pyc" -delete 
+
 🧭 Goal
 
 You want to:
