@@ -70,14 +70,16 @@ async def main():
         campaign = camp_res.json()[0]
 
         step_res = await client.get(
-            f"{url}/rest/v1/lead_campaign_steps?registration_id=eq.{SEEDED_REGISTRATION_ID}&select=id",
+            f"{url}/rest/v1/lead_campaign_steps"
+            f"?registration_id=eq.{SEEDED_REGISTRATION_ID}&select=id",
             headers={"apikey": key, "Authorization": f"Bearer {key}"},
         )
 
         if step_res.status_code == 400 or not step_res.json():
             print("⚠️ registration_id not found, trying enrollment_id instead...")
             step_res = await client.get(
-                f"{url}/rest/v1/lead_campaign_steps?enrollment_id=eq.{enrollment['id']}&select=id",
+                f"{url}/rest/v1/lead_campaign_steps"
+                f"?enrollment_id=eq.{enrollment['id']}&select=id",
                 headers={"apikey": key, "Authorization": f"Bearer {key}"},
             )
 
@@ -106,7 +108,8 @@ async def main():
     # --- Step 3: Initiate real outbound voice call via Synthflow ---
     print("📞 Initiating real voice call via Synthflow...\n")
 
-    result = await voice_agent.facilitate_call_from_campaign(
+    # VoiceConversationAgent now returns a classification dict, not provider_ref/status
+    classification = await voice_agent.facilitate_call_from_campaign(
         generated_msg=generated_msg,
         enrollment_id=enrollment_id,
         lead_id=enrollment_id,
@@ -115,13 +118,26 @@ async def main():
         simulate=False,  # ensures a real Synthflow API call
     )
 
-    print("✅ Outbound call initiated successfully.")
-    print(f"   → Provider Ref: {result.get('provider_ref')}")
-    print(f"   → Status: {result.get('status')}\n")
+    print("✅ Outbound call initiated and classification completed.")
+    print(f"   → Intent: {classification.get('intent')}")
+    print(f"   → Next Action: {classification.get('next_action')}\n")
 
     print("🕒 Waiting for Synthflow to post transcript to webhook (/api/voice/transcript)...\n")
     print("   Use ngrok logs or your FastAPI console to verify incoming webhook calls.")
     print("   Once the transcript is received, it will automatically be stored in Supabase.\n")
+
+    # 🔎 Fetch provider_ref from lead_campaign_steps (VoiceConversationAgent saved it there)
+    async with httpx.AsyncClient() as client:
+        step_ref_res = await client.get(
+            f"{url}/rest/v1/lead_campaign_steps"
+            f"?id=eq.{campaign_step_id}&select=provider_ref",
+            headers={"apikey": key, "Authorization": f"Bearer {key}"},
+        )
+        step_ref_res.raise_for_status()
+        step_row = step_ref_res.json()[0]
+        provider_ref = step_row.get("provider_ref")
+
+    print(f"🔗 Using provider_ref={provider_ref} to poll message table...\n")
 
     # Optional: short polling loop to check if webhook has posted transcript yet
     for attempt in range(10):
@@ -131,7 +147,8 @@ async def main():
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
-                    f"{url}/rest/v1/message?provider_ref=eq.{result.get('provider_ref')}&select=content,transcript,status",
+                    f"{url}/rest/v1/message"
+                    f"?provider_ref=eq.{provider_ref}&select=content,transcript,status",
                     headers={"apikey": key, "Authorization": f"Bearer {key}"},
                 )
                 if resp.status_code == 200 and resp.json():

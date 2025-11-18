@@ -4,12 +4,22 @@ Synthflow Voice Provider Adapter
 -------------------------------------------
 Handles outbound call initiation and webhook configuration
 for Cory Admissions (via Synthflow Programmable Voice API).
+
+Now supports dynamic prompt override:
+
+- Prefer vars["prompt"] as the full runtime prompt for Synthflow
+- Fallback to vars["script"] (for backward compatibility)
+- Fallback to DEFAULT_SCRIPT if neither is provided
+
+Other keys in vars (except prompt/script/lead_name) are passed as
+custom_variables so they can be referenced in the Synthflow agent.
 """
 
 import os
 import json
 import logging
 from typing import Optional, Dict, Any
+
 import httpx
 from dotenv import load_dotenv
 
@@ -42,7 +52,7 @@ def map_synthflow_status(resp_json: Dict[str, Any]) -> str:
     """Normalize Synthflow API response status."""
     if not resp_json:
         return "TEMPORARY_FAILURE"
-    if resp_json.get("call_id") or resp_json.get("id"):
+    if resp_json.get("call_id") or resp_json.get("id") or resp_json.get("response", {}).get("call_id"):
         return "sent"
     return resp_json.get("status", "queued")
 
@@ -61,10 +71,14 @@ async def send_voice_call(
     Initiate an outbound voice call via Synthflow API.
 
     Args:
-        org_id: Organization ID
+        org_id: Organization ID (currently informational, can be used for metadata)
         enrollment_id: Campaign enrollment ID
         to: Target phone number (E.164 format)
-        vars: Optional dict of contextual variables for the voice agent
+        vars: Optional dict of contextual variables for the voice agent:
+              - prompt: full dynamic prompt override for Synthflow (preferred)
+              - script: legacy script text (mapped to prompt if present)
+              - lead_name: student name for display
+              - any other keys -> forwarded as custom_variables
     """
     if not SYNTHFLOW_KEY or not SYNTHFLOW_MODEL:
         raise RuntimeError("❌ Synthflow credentials not configured in environment")
@@ -72,23 +86,49 @@ async def send_voice_call(
     if not to:
         raise ValueError("❌ 'to' phone number is missing or invalid")
 
-    callback_url = f"{CALLBACK_BASE_URL.rstrip('/')}/api/voice/transcript" if CALLBACK_BASE_URL else None
+    vars = vars or {}
 
-    # ✅ Use custom campaign message if available
-    script_text = (vars or {}).get("script") or DEFAULT_SCRIPT
+    callback_url = (
+        f"{CALLBACK_BASE_URL.rstrip('/')}/api/voice/transcript"
+        if CALLBACK_BASE_URL
+        else None
+    )
 
-    # ✅ Correct Synthflow payload
-    payload = {
+    # 🔥 Dynamic prompt override:
+    # 1) Prefer explicit vars["prompt"]
+    # 2) Fallback to vars["script"] (legacy)
+    # 3) Fallback to DEFAULT_SCRIPT
+    dynamic_prompt: Optional[str] = vars.get("prompt")
+    if not dynamic_prompt:
+        legacy_script = vars.get("script")
+        dynamic_prompt = legacy_script or DEFAULT_SCRIPT
+
+    # Use lead_name for the call "name" if provided; otherwise tag with enrollment
+    lead_name = vars.get("lead_name")
+    display_name = lead_name or f"Enrollment-{enrollment_id}"
+
+    # Build custom_variables from vars, excluding fields we handle separately
+    excluded_keys = {"prompt", "script", "lead_name"}
+    custom_variables = [
+        {"key": k, "value": v}
+        for k, v in vars.items()
+        if k not in excluded_keys
+    ]
+
+    # ✅ Synthflow payload using dynamic prompt override
+    payload: Dict[str, Any] = {
         "model_id": SYNTHFLOW_MODEL,
         "phone": to,
-        "name": f"Enrollment-{enrollment_id}",
-        "script": script_text,
-        "custom_variables": [
-        {"key": k, "value": v} for k, v in (vars or {}).items()
-        ]
+        "name": display_name,
+        # Synthflow expects the "prompt" field for runtime prompt override.
+        "prompt": dynamic_prompt,
     }
 
-    # ✅ Synthflow requires the key `external_webhook_url`
+    # Only include custom_variables if we actually have some
+    if custom_variables:
+        payload["custom_variables"] = custom_variables
+
+    # Synthflow requires external_webhook_url for call event callbacks
     if callback_url:
         payload["external_webhook_url"] = callback_url
 
@@ -97,7 +137,7 @@ async def send_voice_call(
         "Content-Type": "application/json",
     }
 
-    result = {
+    result: Dict[str, Any] = {
         "channel": "voice",
         "enrollment_id": enrollment_id,
         "provider_ref": None,
@@ -128,7 +168,8 @@ async def send_voice_call(
             result["status"] = map_synthflow_status(data)
 
             log.info(
-                "✅ [Synthflow] Call initiated | enrollment=%s | provider_ref=%s | status=%s",
+                "✅ [Synthflow] Call initiated | org=%s | enrollment=%s | provider_ref=%s | status=%s",
+                org_id,
                 enrollment_id,
                 provider_ref,
                 result["status"],
@@ -144,7 +185,7 @@ async def send_voice_call(
         result["response_raw"] = {"error": str(e), "status_code": code}
         return result
 
-    except Exception as ex:
+    except Exception as ex:  # noqa: BLE001
         log.exception("[Synthflow] Unexpected error: %s", ex)
         result["status"] = "TEMPORARY_FAILURE"
         result["response_raw"] = {"error": str(ex)}
