@@ -269,6 +269,75 @@ CREATE TABLE public.reengagement_campaigns (
 ALTER TABLE public.enrollment ALTER COLUMN status SET DEFAULT 'created';
 ALTER TABLE public.message ALTER COLUMN status SET DEFAULT 'pending';
 
+ALTER TABLE public.enrollment
+    ADD COLUMN IF NOT EXISTS program_interest text,
+    ADD COLUMN IF NOT EXISTS start_term text,
+    ADD COLUMN IF NOT EXISTS preferred_channel text,
+    ADD COLUMN IF NOT EXISTS preferred_contact_times jsonb DEFAULT '[]'::jsonb;
+
+-- first_name / last_name stay on public.contact (no duplication)
+
+------------------------------------------------------------
+-- 2️⃣ Extend lead_campaign_steps for full lifecycle tracking
+------------------------------------------------------------
+
+ALTER TABLE public.lead_campaign_steps
+    ADD COLUMN IF NOT EXISTS enrollment_id uuid REFERENCES public.enrollment(id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS campaign_id uuid REFERENCES public.campaigns(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS channel text,       -- sms | email | voice | whatsapp
+    ADD COLUMN IF NOT EXISTS direction text,     -- outbound | inbound
+    ADD COLUMN IF NOT EXISTS prompt_used text,   -- dynamic prompt sent to Synthflow
+    ADD COLUMN IF NOT EXISTS provider_ref text,  -- Synthflow call/message ID
+    ADD COLUMN IF NOT EXISTS started_at timestamptz,
+    ADD COLUMN IF NOT EXISTS next_run_at timestamptz;
+
+-- Optional backfill for existing rows (ties steps to enrollment/campaign using registration_id)
+UPDATE public.lead_campaign_steps lcs
+SET
+    enrollment_id = e.id,
+    campaign_id   = e.campaign_id
+FROM public.enrollment e
+WHERE lcs.enrollment_id IS NULL
+  AND lcs.registration_id = e.registration_id;
+
+------------------------------------------------------------
+-- 3️⃣ Extend appointments with enrollment + channel info
+------------------------------------------------------------
+
+ALTER TABLE public.appointments
+    ADD COLUMN IF NOT EXISTS enrollment_id uuid REFERENCES public.enrollment(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS channel text,            -- phone | zoom | in_person
+    ADD COLUMN IF NOT EXISTS source text,             -- synthflow_voice | sms_link | email_link | manual
+    ADD COLUMN IF NOT EXISTS calendar_event_id text,  -- Google/HubSpot event ID
+    ADD COLUMN IF NOT EXISTS status text DEFAULT 'scheduled';
+
+-- Optional: backfill enrollment_id using registration_id where possible
+UPDATE public.appointments a
+SET enrollment_id = e.id
+FROM public.enrollment e
+WHERE a.enrollment_id IS NULL
+  AND a.registration_id IS NOT NULL
+  AND a.registration_id = e.registration_id;
+
+------------------------------------------------------------
+-- 4️⃣ Campaign enrollments table (fresh, correct shape)
+------------------------------------------------------------
+
+-- If you had an older/incorrect version, drop it so we can recreate.
+DROP TABLE IF EXISTS public.campaign_enrollments;
+
+CREATE TABLE public.campaign_enrollments (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    enrollment_id uuid NOT NULL REFERENCES public.enrollment(id) ON DELETE CASCADE,
+    campaign_id uuid NOT NULL REFERENCES public.campaigns(id) ON DELETE CASCADE,
+    campaign_type text NOT NULL DEFAULT 'lead',  -- lead | nurture | reengagement
+    tier text DEFAULT 'tier1',
+    is_active boolean DEFAULT TRUE,
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now(),
+    CONSTRAINT uq_campaign_enrollment UNIQUE (enrollment_id, campaign_id, campaign_type)
+);
+
 COMMIT;
 
 -- Indexes for performance optimization
@@ -422,5 +491,45 @@ VALUES
 INSERT INTO public.reengagement_campaigns (id, name, organization_id, trigger_condition, message_template_id)
 VALUES
   ('cccccccc-cccc-cccc-cccc-ccccccccccc2', 'Dormant Reconnect', '33333333-3333-3333-3333-333333333333', 'no_response_30_days', '88888888-8888-8888-8888-888888888881');
+
+COMMIT;
+
+BEGIN;
+
+INSERT INTO public.lead_campaign_steps (
+    id,
+    registration_id,
+    enrollment_id,
+    campaign_id,
+    step_order,
+    step_name,
+    step_type,
+    channel,
+    direction,
+    status,
+    prompt_used,
+    provider_ref,
+    metadata,
+    started_at,
+    completed_at
+)
+SELECT
+    gen_random_uuid(),
+    e.registration_id,
+    e.id,
+    e.campaign_id,
+    99,
+    'Voice Outreach (Seed)',
+    'voice',
+    'voice',
+    'outbound',
+    'completed',
+    'You are Cory, an AI admissions assistant for Cory College. You are calling a prospective student about their registration and interest in our programs...',
+    'TEST-CALL-ID-123',
+    jsonb_build_object('seed', true, 'note', 'example voice step for Ticket 1'),
+    now() - interval '5 minutes',
+    now()
+FROM public.enrollment e
+LIMIT 1;
 
 COMMIT;

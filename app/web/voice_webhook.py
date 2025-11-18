@@ -25,24 +25,35 @@ async def receive_transcript(request: Request):
     data = await request.json()
     log.info(f"[Webhook] Received payload from Synthflow: {json.dumps(data)[:500]}")
 
-    # ✅ Correctly unwrap Synthflow JSON structure
-    call = data.get("call", {})
-    provider_ref = call.get("call_id")
-    transcript = call.get("transcript", "")
-    audio_url = call.get("recording_url")
+    # ✅ Unwrap Synthflow JSON structure
+    call = data.get("call", {}) or {}
+    provider_ref = call.get("call_id") or data.get("call_id")
 
-    # Optional metadata
-    lead_name = data.get("lead", {}).get("name")
-    enrollment_id = None
-    if lead_name and lead_name.startswith("Enrollment-"):
-        enrollment_id = lead_name.replace("Enrollment-", "")
+    # Transcript & audio URL (what you want in top-level columns)
+    transcript = (
+        call.get("transcript")
+        or data.get("transcript")
+        or ""
+    )
+    audio_url = (
+        call.get("recording_url")
+        or data.get("recording_url")
+        or data.get("audio_url")
+    )
 
+    # Optional metadata: we no longer try to parse enrollment_id from lead name
+    lead = data.get("lead", {}) or {}
+    lead_name = lead.get("name")
+    lead_phone = lead.get("phone_number")
+
+    enrollment_id = None  # can be wired later via external_id/metadata if needed
     project_id = os.getenv("DEFAULT_PROJECT_ID")
 
     if not provider_ref:
-        log.warning(f"[Webhook] Missing call_id in Synthflow payload: {data.keys()}")
+        log.warning(f"[Webhook] Missing call_id in Synthflow payload: {list(data.keys())}")
         return {"error": "Missing call_id"}, 400
 
+    # Store rich content (what you saw in your SELECT)
     content = {
         "transcript": transcript,
         "audio_url": audio_url,
@@ -56,15 +67,24 @@ async def receive_transcript(request: Request):
         "channel": "voice",
         "direction": "inbound",
         "provider_ref": provider_ref,
-        "status": data.get("status", "completed"),
-        "content": json.dumps(content),
+        # Prefer call.status if present, else top-level status, else completed
+        "status": call.get("status") or data.get("status", "completed"),
+        # ❗ IMPORTANT: pass dict, not json.dumps(...)
+        "content": content,
+        "transcript": transcript,   # 🔥 populate column
+        "audio_url": audio_url,     # 🔥 populate column
         "occurred_at": now,
         "created_at": now,
     }
 
     try:
         res = supabase.table("message").insert(record).execute()
-        log.info(f"✅ Stored voice transcript for call_id={provider_ref}")
+        log.info(
+            "✅ Stored voice transcript for call_id=%s (phone=%s, lead=%s)",
+            provider_ref,
+            lead_phone,
+            lead_name,
+        )
         return {"success": True, "provider_ref": provider_ref}
 
     except APIError as e:

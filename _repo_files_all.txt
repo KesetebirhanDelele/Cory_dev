@@ -118,6 +118,7 @@ app\web\__init__.py
 app\web\email_webhook.py
 app\web\idempotency.py
 app\web\idempotency_cache.py
+app\web\metrics.py
 app\web\middleware.py
 app\web\openapi_examples.json
 app\web\routes_handoffs.py
@@ -132,6 +133,7 @@ app\web\webhook.py
 backups
 backups\cory_backup.dump
 backups\cory_backup_20251014_151120.dump
+-Body
 current_workflow.json
 db_connection_test.py
 diagram
@@ -139,6 +141,10 @@ diagram\channel-execution.dot
 diagram\channel-execution.svg
 diagram\classifier-branching.dot
 diagram\classifier-branching.svg
+diagram\enrollment_flow.dot
+diagram\enrollment_flow.svg
+diagram\enrollment_flow_2.dot
+diagram\enrollment_flow2.svg
 diagram\high-level.dot
 diagram\high-level.svg
 diagram\langgraph-role.dot
@@ -154,6 +160,7 @@ docs\signal_contract.md
 docs\state_snapshot_mapping.md
 dot
 GitCommands.MD
+-Headers
 pytest.ini
 README.md
 repo_structure.ps1
@@ -277,6 +284,7 @@ tests\web
 tests\web\test_health.py
 tests\web\test_idempotency.py
 tests\web\test_kpi_route.py
+tests\web\test_metrics.py
 tests\web\test_schemas.py
 tests\web\test_sms_webhook.py
 tests\web\test_webhook_email.py
