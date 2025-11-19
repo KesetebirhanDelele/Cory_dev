@@ -1,0 +1,65 @@
+digraph EnrollmentCampaignFlow {
+  rankdir=LR;
+  fontname="Inter,Arial";
+  node [shape=box, style="rounded,filled", fillcolor="#f7f7f9", color="#999", fontname="Inter,Arial"];
+  edge [color="#666", fontname="Inter,Arial"];
+
+  /* ---------- Entry ---------- */
+  NEW_LEAD [label="New Lead\nregistration in Supabase", shape=oval, fillcolor="#E3F2FD"];
+
+  /* ---------- Lead campaign ---------- */
+  subgraph cluster_lead {
+    label="Lead Campaign";
+    color="#cfcfcf";
+
+    LEAD_OUTREACH [label="Lead Outreach Step\n(voice / SMS / email)"];
+    CLASSIFY      [label="Classify Intent\n(voice transcript or text)"];
+  }
+
+  NEW_LEAD -> LEAD_OUTREACH;
+  LEAD_OUTREACH -> CLASSIFY;
+
+  /* ---------- Intent branches ---------- */
+  READY     [label="BookAppointmentWorkflow\n+ AppointmentSchedulerAgent", fillcolor="#E8F5E9"];
+  NURTURE   [label="NurtureCampaignWorkflow\n15-email Smart Nurture",     fillcolor="#FFFDE7"];
+  REENGAGE  [label="ReengagementCampaignWorkflow\n60-day touches (≤ 1yr)", fillcolor="#FFF3E0"];
+  FOLLOWUP  [label="FollowUpSchedulerAgent\ncallback/voicemail sequence", fillcolor="#E1F5FE"];
+  ESCALATE  [label="Escalate to Human\nmanual review",                   fillcolor="#FFEBEE"];
+
+  CLASSIFY -> READY    [label="ready_to_enroll"];
+  CLASSIFY -> NURTURE  [label="interested_but_not_ready\nOR unsure_or_declined"];
+  CLASSIFY -> REENGAGE [label="not_interested"];
+  CLASSIFY -> FOLLOWUP [label="callback_requested\nOR voicemail/no_answer"];
+  CLASSIFY -> ESCALATE [label="unclassified / low confidence"];
+
+  /* ---------- Follow-up sequence ---------- */
+  subgraph cluster_followup {
+    label="Callback / Voicemail Sequence";
+    color="#cfcfcf";
+
+    FU_SMS  [label="+1h SMS reminder\nvia Synthflow/SMS"];
+    FU_CALL [label="+2h voice call\nvia Synthflow"];
+    FU_EMAIL[label="If still no response:\nEmail reminder"];
+  }
+
+  FOLLOWUP -> FU_SMS -> FU_CALL -> FU_EMAIL;
+
+  /* ---------- Reply from any channel ---------- */
+  REPLY [label="Reply via\nvoice / SMS / email", shape=diamond, fillcolor="#F1F8E9"];
+
+  FU_SMS  -> REPLY;
+  FU_CALL -> REPLY;
+  FU_EMAIL-> REPLY;
+
+  NURTURE -> REPLY [label="lead replies\nor clicks CTA", style=dashed];
+  REENGAGE -> REPLY [label="lead replies\nany cycle", style=dashed];
+
+  REPLY -> CLASSIFY [label="re-classify intent\n(voice or text)"];
+
+  /* ---------- Long-term outcomes ---------- */
+  INACTIVE [label="Inactive / Unreachable\n(>1yr, no reply)", fillcolor="#F5F5F5"];
+  REENGAGE -> INACTIVE [label="no reply after 6 cycles"];
+
+  ENROLLED [label="Enrolled / Admitted", shape=oval, fillcolor="#DCEDC8"];
+  READY -> ENROLLED [label="human appointment\ncompleted", style=dashed];
+}

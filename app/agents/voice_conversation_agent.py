@@ -1,3 +1,4 @@
+# voice_conversation_agent.py
 """
 VoiceConversationAgent
 ----------------------------------------------------------
@@ -7,7 +8,7 @@ Responsibilities:
 - Initiates or simulates voice calls (via Synthflow)
 - Collects or polls transcripts from `message` table
 - Uses ConversationalResponseAgent to classify and summarize outcomes
-- Persists transcript, intent, and next_action to Supabase
+- Persists transcript, intent, next_action, prompt_used, provider_ref to Supabase
 - Triggers follow-up workflows for "ready_to_enroll" leads
 """
 
@@ -49,8 +50,13 @@ class VoiceConversationAgent:
     ) -> Dict[str, Any]:
         """
         Starts a live or simulated voice conversation and classifies outcome.
+
+        If vars contains a 'prompt' key, it will be passed through to
+        send_voice_call for dynamic prompt override and recorded as
+        prompt_used on the lead_campaign_step.
         """
         log.info("🎙️ VoiceConversationAgent starting for lead %s", lead_id)
+        vars = vars or {}
 
         # --- 1️⃣ Retrieve transcript text (simulated or real) ---
         if simulate:
@@ -61,11 +67,24 @@ class VoiceConversationAgent:
             )
         else:
             try:
-                res = await send_voice_call(org_id, enrollment_id, phone, vars=vars or {})
+                res = await send_voice_call(org_id, enrollment_id, phone, vars=vars)
                 provider_ref = res.get("provider_ref")
                 log.info("📞 Live call initiated with provider_ref=%s", provider_ref)
+
+                # Persist prompt_used/provider_ref/start time if we have a campaign_step_id
+                prompt_used = vars.get("prompt")
+                if campaign_step_id:
+                    await self.supabase.update_lead_campaign_step(
+                        campaign_step_id,
+                        {
+                            "prompt_used": prompt_used,
+                            "provider_ref": provider_ref,
+                            "started_at": datetime.now(UTC).isoformat(),
+                        },
+                    )
+
                 transcript_text = await self._collect_transcript(provider_ref)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log.exception("❌ Failed to initiate Synthflow call: %s", e)
                 transcript_text = ""
 
@@ -96,20 +115,94 @@ class VoiceConversationAgent:
         """
         Handles a campaign-generated voice message (from CampaignMessageGeneratorAgent),
         simulates or executes a call, then classifies conversation result.
+
+        For live calls, uses dynamic prompt override:
+        - Builds a prompt from lead/campaign/enrollment context
+        - Injects the LLM-generated voice script as part of that prompt
+        - Stores prompt_used + provider_ref on lead_campaign_steps
         """
-        campaign_name = generated_msg["context"]["campaign"].get("name", "Admissions Campaign")
-        outbound_text = generated_msg.get("message_text", "Hello! This is Cory Admissions calling to follow up.")
-        log.info("📢 Initiating campaign-based voice call for %s (%s)", lead_id, campaign_name)
+        context = generated_msg.get("context", {}) or {}
+        campaign_ctx = context.get("campaign", {}) or {}
+        lead_ctx = context.get("lead", {}) or {}
+        enrollment_ctx = context.get("enrollment", {}) or {}
+
+        campaign_name = campaign_ctx.get("name", "Admissions Campaign")
+        outbound_text = generated_msg.get(
+            "message_text",
+            "Hi there, this is Cory Admissions calling to follow up on your interest in our programs.",
+        )
+
+        lead_first = (lead_ctx.get("first_name") or "").strip()
+        lead_last = (lead_ctx.get("last_name") or "").strip()
+        lead_name = f"{lead_first} {lead_last}".strip() or "there"
+
+        program_interest = (
+            enrollment_ctx.get("program_interest")
+            or lead_ctx.get("field_of_study")
+            or "your program of interest"
+        )
+        start_term = enrollment_ctx.get("start_term") or "an upcoming term"
+
+        log.info(
+            "📢 Initiating campaign-based voice call for %s (%s)",
+            lead_id,
+            campaign_name,
+        )
 
         if simulate:
-            transcript = f"agent: {outbound_text}\nlead: I'm interested, but not ready to enroll yet."
+            # Simple simulated transcript
+            transcript = (
+                f"agent: {outbound_text}\n"
+                "lead: I'm interested, but not ready to enroll yet."
+            )
         else:
-            org_id = generated_msg["context"]["campaign"].get("organization_id", "org1")
+            org_id = campaign_ctx.get("organization_id", "org1")
+
+            # Build dynamic prompt for Synthflow
+            dynamic_prompt = (
+                "You are Cory, an AI admissions assistant for Cory College.\n"
+                "You are calling a prospective student about enrolling.\n\n"
+                f"Student name: {lead_name}\n"
+                f"Program interest: {program_interest}\n"
+                f"Preferred start term: {start_term}\n"
+                f"Campaign name: {campaign_name}\n\n"
+                "Use the following outreach script as a flexible guide. "
+                "Speak naturally, ask clarifying questions, and determine if the student is:\n"
+                "- ready_to_enroll\n"
+                "- interested_but_not_ready\n"
+                "- unsure_or_declined\n"
+                "- not_interested\n"
+                "- callback_requested (e.g., 'call me later')\n"
+                "- voicemail/no_answer\n"
+                "- unclassified/low confidence\n\n"
+                "Outreach script:\n"
+                f"{outbound_text}\n\n"
+                "At the end of the call, summarize their intent internally so the system "
+                "can choose the next action based on your transcript."
+            )
+
             try:
-                res = await send_voice_call(org_id, enrollment_id, phone, vars={"script": outbound_text})
+                # Pass dynamic prompt override + lead_name to provider
+                vars = {
+                    "prompt": dynamic_prompt,  # 🔥 dynamic prompt override for Synthflow
+                    "lead_name": lead_name,
+                }
+                res = await send_voice_call(org_id, enrollment_id, phone, vars=vars)
                 provider_ref = res.get("provider_ref")
+                log.info("📞 Live campaign call initiated with provider_ref=%s", provider_ref)
+
+                # Persist prompt + provider_ref + started_at on this campaign step
+                await self.supabase.update_lead_campaign_step(
+                    step_id,
+                    {
+                        "prompt_used": dynamic_prompt,
+                        "provider_ref": provider_ref,
+                        "started_at": datetime.now(UTC).isoformat(),
+                    },
+                )
+
                 transcript = await self._collect_transcript(provider_ref)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log.exception("Synthflow voice call failed: %s", e)
                 transcript = f"agent: {outbound_text}\nlead: Sorry, I missed the call."
 
@@ -144,7 +237,7 @@ class VoiceConversationAgent:
                     if transcript:
                         log.info("📝 Transcript retrieved for %s", call_id)
                         return transcript
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log.warning("Error while fetching transcript: %s", e)
             await asyncio.sleep(5)
         log.warning("⚠️ Timeout waiting for transcript for %s", call_id)
@@ -154,8 +247,11 @@ class VoiceConversationAgent:
     # 💾 Persistence
     # ------------------------------------------------------------------
     async def _persist_results(
-        self, step_id: str, transcript: str, classification: Dict[str, Any]
-    ):
+        self,
+        step_id: str,
+        transcript: str,
+        classification: Dict[str, Any],
+    ) -> None:
         """
         Save transcript + AI classification results to Supabase.
         """
@@ -168,13 +264,13 @@ class VoiceConversationAgent:
             }
             await self.supabase.update_lead_campaign_step(step_id, payload)
             log.info("🧾 Stored transcript + intent for step %s", step_id)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.exception("❌ Failed to persist voice call results: %s", e)
 
     # ------------------------------------------------------------------
     # 🔔 Workflow Notification
     # ------------------------------------------------------------------
-    async def _notify_workflow(self, lead_id: str, classification: Dict[str, Any]):
+    async def _notify_workflow(self, lead_id: str, classification: Dict[str, Any]) -> None:
         """
         Trigger human follow-up or next automation step based on AI classification.
         """
@@ -185,7 +281,7 @@ class VoiceConversationAgent:
             log.info("📞 Lead %s ready to enroll → scheduling human appointment", lead_id)
             try:
                 await self.supabase.create_appointment_task(lead_id)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log.warning("⚠️ Failed to create appointment task: %s", e)
         else:
             log.info("➡️ Lead %s classified as %s → next_action=%s", lead_id, intent, next_action)
