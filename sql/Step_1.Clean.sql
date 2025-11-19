@@ -126,7 +126,9 @@ CREATE TABLE public.enrollment (
     appointment_id uuid,
     created_at timestamptz DEFAULT now(),
     updated_at timestamptz DEFAULT now(),
-    CONSTRAINT uq_enrollment_contact_campaign UNIQUE (contact_id, campaign_id)
+    CONSTRAINT uq_enrollment_contact_campaign UNIQUE (contact_id, campaign_id),
+    -- 🔹 NEW: make registration_id unique so other tables can reference it
+    CONSTRAINT uq_enrollment_registration UNIQUE (registration_id)
 );
 
 -- ==========================================================
