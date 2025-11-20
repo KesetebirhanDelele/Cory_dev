@@ -2,22 +2,34 @@
 """
 ConversationalResponseAgent
 ----------------------------------------------------------
-- Classifies message intent (ready_to_enroll, interested_but_not_ready, unsure_or_declined)
+- Classifies message intent into a shared set:
+    - ready_to_enroll
+    - interested_but_not_ready
+    - unsure_or_declined
+    - not_interested
+    - callback_requested
+    - unclassified
 - Generates empathetic, contextual replies
-- Logs conversations and AI responses in Supabase
-- Provides classify_message() for VoiceConversationAgent and workflows
-- Can respond directly to generated campaign messages
+- Returns a structured object:
+    {
+      "intent": "...",
+      "response_message": "...",
+      "next_action": "..."
+    }
+- Used by VoiceConversationAgent and inbound text workflows.
 """
 
 import os
 import json
-import uuid
 import logging
-from datetime import datetime
 from typing import Dict, Any, Optional
+
 from dotenv import load_dotenv
-from openai import OpenAI
-from supabase import create_client, Client
+
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover
+    OpenAI = None  # type: ignore
 
 # ---------------------------------------------------------------------
 # 🔧 Environment & Logging Setup
@@ -26,232 +38,287 @@ load_dotenv()
 logger = logging.getLogger("cory.conversational.agent")
 logger.setLevel(logging.INFO)
 
+ALLOWED_INTENTS = [
+    "ready_to_enroll",
+    "interested_but_not_ready",
+    "unsure_or_declined",
+    "not_interested",
+    "callback_requested",
+    "unclassified",
+]
+
+DEFAULT_NEXT_ACTION = {
+    "ready_to_enroll": "schedule_appointment",
+    "interested_but_not_ready": "start_nurture_campaign",
+    "unsure_or_declined": "start_nurture_campaign",
+    "not_interested": "stop_outreach",
+    "callback_requested": "schedule_callback",
+    "unclassified": "manual_review",
+}
+
 
 class ConversationalResponseAgent:
     """
-    Handles inbound/outbound message conversations across channels
-    (SMS, Email, WhatsApp, Voice), performs classification, and
-    returns structured response objects for automation workflows.
+    Handles inbound message conversations across channels
+    (SMS, Email, WhatsApp, Voice transcripts), performs classification,
+    and returns structured response objects for automation workflows.
     """
 
-    def __init__(self):
-        # --- Supabase setup ---
-        url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
-        if not url or not key:
-            raise ValueError("Missing Supabase credentials (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).")
-
-        self.supabase: Client = create_client(url, key)
-
-        # --- OpenAI setup ---
+    def __init__(self) -> None:
+        # --- OpenAI setup (optional) ---
         api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("Missing OPENAI_API_KEY in environment variables.")
-        self.openai = OpenAI(api_key=api_key)
+        if OpenAI is not None and api_key:
+            self.openai = OpenAI(api_key=api_key)
+            self.use_llm = True
+        else:
+            if not api_key:
+                logger.warning(
+                    "OPENAI_API_KEY not set; ConversationalResponseAgent will use rule-based mode only."
+                )
+            self.openai = None
+            self.use_llm = False
 
     # ------------------------------------------------------------------
-    # 🧠 AI Response Generation Core
+    # 🔍 Public API
     # ------------------------------------------------------------------
-    def _generate_ai_reply(self, lead_name: str, inbound_text: str, campaign_name: str) -> dict:
+    async def classify_message(self, text: str, channel: str = "sms") -> Dict[str, Any]:
         """
-        Internal helper for OpenAI-based classification and response generation.
+        Classify free-form text (e.g., SMS reply or call transcript) into intent and next_action.
+
+        Returns:
+            {
+              "intent": "<one of ALLOWED_INTENTS>",
+              "response_message": "<empathetic reply>",
+              "next_action": "<system action string>"
+            }
         """
-        prompt = f"""
-        You are an admissions assistant for a campaign called "{campaign_name}".
-        You are chatting with a student named {lead_name}.
+        text = (text or "").strip()
+        if not text:
+            intent = "unclassified"
+            return {
+                "intent": intent,
+                "response_message": "I’m here whenever you’re ready with questions about enrollment.",
+                "next_action": DEFAULT_NEXT_ACTION[intent],
+            }
 
-        The student said: "{inbound_text}"
+        # 1️⃣ First pass: deterministic rule-based classification
+        rule_result = self._rule_based_classify(text)
 
-        Your task:
-        1️⃣ Classify the student's intent:
-            - ready_to_enroll
-            - interested_but_not_ready
-            - unsure_or_declined
-
-        2️⃣ Generate a short, empathetic, human-like response (1-2 sentences).
-
-        3️⃣ Suggest the next system action:
-            - schedule_followup_phone
-            - send_information_packet
-            - handoff_to_human
-
-        Return ONLY valid JSON in the following format:
-        {{
-          "intent": "<one of the 3 intents>",
-          "response_message": "<natural empathetic message>",
-          "next_action": "<one of the actions>"
-        }}
-        """
+        # 2️⃣ Optional LLM refinement if configured
+        if not self.use_llm:
+            return rule_result
 
         try:
-            ai_response = self.openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are a warm and helpful admissions assistant."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.7,
-                max_tokens=250,
-            )
-            text = ai_response.choices[0].message.content.strip()
+            llm_result = await self._llm_classify(text=text, channel=channel)
+            intent = self._normalize_intent(llm_result.get("intent"))
 
-            # Try parsing JSON from model output
-            try:
-                response_json = json.loads(text)
-            except json.JSONDecodeError:
-                logger.warning(f"⚠️ Failed to parse AI JSON: {text}")
-                response_json = {
-                    "intent": "unsure_or_declined",
-                    "response_message": text,
-                    "next_action": "handoff_to_human",
+            if intent in ALLOWED_INTENTS:
+                response_message = (
+                    llm_result.get("response_message") or rule_result["response_message"]
+                )
+                next_action = llm_result.get("next_action") or DEFAULT_NEXT_ACTION[intent]
+                return {
+                    "intent": intent,
+                    "response_message": response_message,
+                    "next_action": next_action,
                 }
+        except Exception as e:  # noqa: BLE001
+            logger.exception("LLM classification failed; falling back to rule-based result: %s", e)
 
-        except Exception as e:
-            logger.error(f"AI error during response generation: {e}")
-            response_json = {
-                "intent": "unsure_or_declined",
-                "response_message": "Thanks for sharing! Would you like to learn more about our programs?",
-                "next_action": "handoff_to_human",
-            }
-
-        return response_json
+        return rule_result
 
     # ------------------------------------------------------------------
-    # 💬 Conversation Simulation (Manual)
+    # 🧩 Rule-based classifier (deterministic, testable)
     # ------------------------------------------------------------------
-    def process_conversation(self, registration_id: str):
+    def _rule_based_classify(self, text: str) -> Dict[str, Any]:
         """
-        Manual test mode for SMS/email-like conversations.
-        Fetches enrollment context and allows simulated dialogue in the terminal.
+        Simple keyword-based classifier that never calls the LLM.
+        This guarantees a valid result even in offline/dev environments.
         """
+        lowered = text.lower()
 
-        enrollment_data = (
-            self.supabase.table("enrollment")
-            .select("id, contact_id, campaign_id, project_id")
-            .eq("registration_id", registration_id)
-            .execute()
-        )
+        # Ready to enroll / wants to apply / wants to be admitted
+        if any(
+            kw in lowered
+            for kw in [
+                "ready to enroll",
+                "ready to apply",
+                "i want to enroll",
+                "get admitted",
+                "register now",
+                "i want to get admitted",
+            ]
+        ):
+            intent = "ready_to_enroll"
+            response = (
+                "That’s wonderful! I can help you with the next steps to enroll. "
+                "Would you like to schedule a quick call or handle everything online?"
+            )
 
-        if not enrollment_data.data:
-            raise ValueError(f"Enrollment not found for registration_id={registration_id}")
+        # Callback requested / phone follow-up
+        elif any(
+            kw in lowered
+            for kw in [
+                "call me back",
+                "call me later",
+                "can you call",
+                "give me a call",
+                "phone call",
+                "reach me by phone",
+            ]
+        ):
+            intent = "callback_requested"
+            response = (
+                "Thanks for letting me know! I can arrange a callback. "
+                "Is there a specific day and time that works best for you?"
+            )
 
-        enrollment = enrollment_data.data[0]
-        contact = (
-            self.supabase.table("contact")
-            .select("first_name, last_name, email, phone")
-            .eq("id", enrollment["contact_id"])
-            .execute()
-            .data[0]
-        )
+        # Not interested / stop outreach
+        elif any(
+            kw in lowered
+            for kw in [
+                "not interested",
+                "no longer interested",
+                "stop contacting",
+                "please stop",
+                "do not contact",
+                "dont contact",
+                "unsubscribe",
+            ]
+        ):
+            intent = "not_interested"
+            response = (
+                "Thanks for telling me. I’ll update your preferences and stop outreach. "
+                "If you change your mind in the future, we’ll be glad to help."
+            )
 
-        lead_name = (f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()) or "there"
-        campaign = (
-            self.supabase.table("campaigns")
-            .select("id, name")
-            .eq("id", enrollment["campaign_id"])
-            .execute()
-            .data[0]
-        )
-        campaign_name = campaign.get("name", "Admissions Campaign")
+        # Interested but not ready yet (needs time, later, thinking)
+        elif any(
+            kw in lowered
+            for kw in [
+                "not ready",
+                "maybe later",
+                "need more time",
+                "still deciding",
+                "thinking about it",
+                "later this year",
+            ]
+        ):
+            intent = "interested_but_not_ready"
+            response = (
+                "No problem at all—this is an important decision. "
+                "Would it help if I sent you a few more details "
+                "about the program and your options?"
+            )
 
-        print(f"\n🎓 Connected to campaign: {campaign_name}")
-        print(f"💬 Chatting with simulated lead: {lead_name}\n")
+        # Unsure / declined / has concerns
+        elif any(
+            kw in lowered
+            for kw in [
+                "not sure",
+                "unsure",
+                "i don't know",
+                "i dont know",
+                "have some concerns",
+                "on the fence",
+                "hesitant",
+            ]
+        ):
+            intent = "unsure_or_declined"
+            response = (
+                "I understand—there can be a lot to consider. "
+                "What questions or concerns do you have about the program or enrollment process?"
+            )
 
-        while True:
-            student_message = input("👩‍🎓 Student: ").strip()
-            if student_message.lower() in {"exit", "quit"}:
-                print("👋 Ending conversation.")
-                break
+        else:
+            intent = "unclassified"
+            response = (
+                "Thanks for your message. I want to make sure I understand you correctly—"
+                "could you share a bit more about where you are in your decision to enroll?"
+            )
 
-            # Log inbound message
-            inbound_msg = {
-                "id": str(uuid.uuid4()),
-                "project_id": enrollment["project_id"],
-                "enrollment_id": enrollment["id"],
-                "channel": "sms",
-                "direction": "inbound",
-                "content": {"text": student_message},
-                "status": "received",
-                "occurred_at": datetime.utcnow().isoformat(),
-            }
-            self.supabase.table("message").insert(inbound_msg).execute()
-
-            # AI classify + respond
-            response_json = self._generate_ai_reply(lead_name, student_message, campaign_name)
-
-            # Log outbound message
-            outbound_msg = {
-                "id": str(uuid.uuid4()),
-                "project_id": enrollment["project_id"],
-                "enrollment_id": enrollment["id"],
-                "channel": "sms",
-                "direction": "outbound",
-                "content": {"text": response_json["response_message"]},
-                "status": "sent",
-                "occurred_at": datetime.utcnow().isoformat(),
-            }
-            self.supabase.table("message").insert(outbound_msg).execute()
-
-            # Log AI event
-            self.supabase.table("event").insert({
-                "id": str(uuid.uuid4()),
-                "project_id": enrollment["project_id"],
-                "enrollment_id": enrollment["id"],
-                "event_type": "ai_conversational_response",
-                "direction": "outbound",
-                "payload": response_json,
-                "created_at": datetime.utcnow().isoformat(),
-            }).execute()
-
-            print(f"\n🤖 AI: {response_json['response_message']}\n")
-
-    # ------------------------------------------------------------------
-    # 🧩 Respond to Campaign Message
-    # ------------------------------------------------------------------
-    async def respond_to_generated_message(
-        self,
-        generated_msg: Dict[str, Any],
-        simulated_reply: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Handles a real or simulated user reply to a campaign-generated message.
-        Can be invoked by Temporal workflows or test harnesses.
-
-        Args:
-            generated_msg: message payload returned from CampaignMessageGeneratorAgent
-            simulated_reply: user reply text (optional, prompts input if missing)
-        Returns:
-            dict: AI classification + response_message + next_action
-        """
-        lead_name = generated_msg["context"]["lead"].get("name", "Student")
-        campaign_name = generated_msg["context"]["campaign"].get("name", "Admissions Campaign")
-        outbound_text = generated_msg["message_text"]
-
-        print(f"\n📤 Outbound Message Sent: {outbound_text}")
-
-        if not simulated_reply:
-            simulated_reply = input("👩‍🎓 Lead Reply: ").strip()
-        if not simulated_reply:
-            simulated_reply = "I'm still thinking about it."
-
-        classification = self._generate_ai_reply(lead_name, simulated_reply, campaign_name)
-
-        print(f"\n🤖 AI: {classification['response_message']}")
-        logger.info(f"Intent={classification['intent']}, NextAction={classification['next_action']}")
-
-        return classification
-
-    # ------------------------------------------------------------------
-    # 🔍 Lightweight API (used by VoiceConversationAgent)
-    # ------------------------------------------------------------------
-    async def classify_message(self, text: str) -> dict:
-        """
-        Classify free-form text (e.g., call transcript) into intent and next_action.
-        Used by VoiceConversationAgent and automated workflows.
-        """
-        result = self._generate_ai_reply("Voice Lead", text, "Admissions Campaign")
+        next_action = DEFAULT_NEXT_ACTION[intent]
         return {
-            "intent": result.get("intent"),
-            "response_message": result.get("response_message"),
-            "next_action": result.get("next_action"),
+            "intent": intent,
+            "response_message": response,
+            "next_action": next_action,
         }
+
+    # ------------------------------------------------------------------
+    # 🤖 LLM helper (optional)
+    # ------------------------------------------------------------------
+    async def _llm_classify(self, text: str, channel: str = "sms") -> Dict[str, Any]:
+        """
+        Ask the LLM to classify the message into one of ALLOWED_INTENTS
+        and suggest a response + next_action. Returns parsed JSON.
+        """
+        if not self.openai:
+            raise RuntimeError("OpenAI client not configured")
+
+        system_prompt = (
+            "You are an admissions assistant helping classify student messages.\n"
+            "Your job is to:\n"
+            "1. Decide the student's intent using ONLY one of these values:\n"
+            f"   {', '.join(ALLOWED_INTENTS)}\n"
+            "2. Write a short, friendly response in the same style as a human admissions counselor.\n"
+            "3. Suggest a next_action for the system to take, such as:\n"
+            "- schedule_appointment\n"
+            "- start_nurture_campaign\n"
+            "- schedule_callback\n"
+            "- stop_outreach\n"
+            "- manual_review\n\n"
+            "Respond ONLY with a JSON object with keys: intent, response_message, next_action."
+        )
+
+        user_prompt = f"Channel: {channel}\nStudent message:\n{text}"
+
+        resp = self.openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+            max_tokens=200,
+        )
+
+        raw = (resp.choices[0].message.content or "").strip()
+
+        # If the model wraps JSON in ```json blocks, strip them
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:].strip()
+
+        try:
+            parsed = json.loads(raw)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to parse LLM JSON, raw=%r error=%s", raw[:200], e)
+            return {}
+
+        return parsed
+
+    # ------------------------------------------------------------------
+    # 🧹 Utility
+    # ------------------------------------------------------------------
+    def _normalize_intent(self, intent: Optional[str]) -> str:
+        """Normalize LLM-returned intent into the allowed set."""
+        if not intent:
+            return "unclassified"
+        normalized = intent.strip().lower()
+
+        if normalized in ALLOWED_INTENTS:
+            return normalized
+
+        if "ready" in normalized and "enroll" in normalized:
+            return "ready_to_enroll"
+        if "not ready" in normalized or "later" in normalized:
+            return "interested_but_not_ready"
+        if "callback" in normalized or "call back" in normalized:
+            return "callback_requested"
+        if "not interested" in normalized:
+            return "not_interested"
+        if "unsure" in normalized or "decline" in normalized:
+            return "unsure_or_declined"
+
+        return "unclassified"

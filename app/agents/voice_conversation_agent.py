@@ -1,4 +1,4 @@
-# voice_conversation_agent.py
+# app/agents/voice_conversation_agent.py
 """
 VoiceConversationAgent
 ----------------------------------------------------------
@@ -89,7 +89,10 @@ class VoiceConversationAgent:
                 transcript_text = ""
 
         # --- 2️⃣ Classify conversation via ConversationalResponseAgent ---
-        classification = await self.conv_agent.classify_message(transcript_text)
+        classification = await self.conv_agent.classify_message(
+            transcript_text,
+            channel="voice",
+        )
 
         # --- 3️⃣ Persist transcript + classification ---
         await self._persist_results(campaign_step_id, transcript_text, classification)
@@ -207,7 +210,10 @@ class VoiceConversationAgent:
                 transcript = f"agent: {outbound_text}\nlead: Sorry, I missed the call."
 
         # Classify the final transcript
-        classification = await self.conv_agent.classify_message(transcript)
+        classification = await self.conv_agent.classify_message(
+            transcript,
+            channel="voice",
+        )
 
         # Persist in Supabase
         await self._persist_results(step_id, transcript, classification)
@@ -227,7 +233,8 @@ class VoiceConversationAgent:
         for _ in range(timeout // 5):
             try:
                 message = await self.supabase.get_message_by_provider_ref(call_id)
-                if message and message.get("status") == "complete":
+                # Status from Synthflow webhook is typically "completed"
+                if message and message.get("status") in ("completed", "sent"):
                     # Prefer explicit 'transcript' column if present, else JSON content
                     transcript = message.get("transcript") or (
                         message.get("content", {}).get("transcript")
@@ -240,6 +247,7 @@ class VoiceConversationAgent:
             except Exception as e:  # noqa: BLE001
                 log.warning("Error while fetching transcript: %s", e)
             await asyncio.sleep(5)
+
         log.warning("⚠️ Timeout waiting for transcript for %s", call_id)
         return ""
 

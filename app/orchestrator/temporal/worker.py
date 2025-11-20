@@ -18,6 +18,8 @@ from app.orchestrator.temporal.workflows.campaign import CampaignWorkflow
 from app.orchestrator.temporal.workflows.handoff import HandoffWorkflow
 from app.orchestrator.temporal.workflows.program_match import ProgramMatchWf
 from app.orchestrator.temporal.workflows.simulated_followup import SimulatedFollowupWorkflow
+from app.orchestrator.temporal.workflows.followup_callback import CallbackFollowupWorkflow
+from app.orchestrator.temporal.workflows.book_appointment_workflow import BookAppointmentWorkflow
 
 # Activities
 from app.orchestrator.temporal.activities.sms_send import sms_send
@@ -28,6 +30,7 @@ from app.orchestrator.temporal.activities.handoff_create import (
     resolve_handoff_rpc,
     mark_timed_out,
 )
+from app.orchestrator.temporal.activities.appointment_book import book_appointment
 from app.orchestrator.temporal.activities import (
     rag_retrieve,
     rag_redact,
@@ -78,6 +81,7 @@ async def _preflight(client: Client) -> None:
     """Log Temporal server version."""
     try:
         from temporalio.api.workflowservice.v1 import GetSystemInfoRequest
+
         info = await client.workflow_service.get_system_info(GetSystemInfoRequest())
         log.info("Temporal server version: %s", getattr(info, "server_version", "unknown"))
     except Exception as e:
@@ -92,7 +96,10 @@ async def _connect_temporal(
         try:
             log.info(
                 "Connecting to Temporal server (%s@%s) — attempt %d/%d",
-                namespace, target, attempt, retries,
+                namespace,
+                target,
+                attempt,
+                retries,
             )
             client = await Client.connect(target, namespace=namespace)
             log.info("Connected to Temporal server: %s", target)
@@ -111,8 +118,12 @@ async def _serve_queue(
     activities: List,
 ) -> None:
     """Start and run a Temporal worker for a given queue."""
-    log.info("🚀 Starting worker | queue=%s | workflows=%d | activities=%d",
-             queue_name, len(workflows), len(activities))
+    log.info(
+        "🚀 Starting worker | queue=%s | workflows=%d | activities=%d",
+        queue_name,
+        len(workflows),
+        len(activities),
+    )
     worker = Worker(
         client=client,
         task_queue=queue_name,
@@ -127,6 +138,7 @@ async def _serve_queue(
         log.exception("Worker crashed on queue %s: %s", queue_name, e)
         raise
 
+
 # --------------------------------------------------------------------------
 # Main Runner
 # --------------------------------------------------------------------------
@@ -138,7 +150,9 @@ async def run() -> None:
     setup_logging()
     log.info(
         "🧠 Cory Temporal Worker starting | target=%s | namespace=%s | queues=%s",
-        TEMPORAL_TARGET, TEMPORAL_NAMESPACE, [TASK_QUEUE, AI_MATCH_QUEUE, RAG_QUEUE],
+        TEMPORAL_TARGET,
+        TEMPORAL_NAMESPACE,
+        [TASK_QUEUE, AI_MATCH_QUEUE, RAG_QUEUE],
     )
 
     client = await _connect_temporal(TEMPORAL_TARGET, TEMPORAL_NAMESPACE)
@@ -150,10 +164,17 @@ async def run() -> None:
         try:
             loop.add_signal_handler(sig, stop_event.set)
         except NotImplementedError:
+            # Not available on some platforms (e.g., Windows)
             pass
 
     # Define workflow groups
-    campaigns_workflows = [CampaignWorkflow, HandoffWorkflow, AnswerWorkflow]
+    campaigns_workflows = [
+        CampaignWorkflow,
+        HandoffWorkflow,
+        AnswerWorkflow,
+        CallbackFollowupWorkflow,   # callback / voicemail sequence
+        BookAppointmentWorkflow,    # booking confirmed appointments
+    ]
     campaigns_activities = [
         sms_send,
         email_send,
@@ -164,6 +185,7 @@ async def run() -> None:
         repo.insert_interaction,
         repo.patch_activity,
         generate_followup_message,
+        book_appointment,  # appointment booking activity
     ]
 
     match_workflows = [ProgramMatchWf]
@@ -182,7 +204,7 @@ async def run() -> None:
         rag_route.route,
     ]
 
-    # ✅ Add a dedicated follow-up worker group
+    # ✅ Dedicated follow-up worker group (simulated follow-up campaign)
     followup_workflows = [SimulatedFollowupWorkflow]
     followup_activities = [
         repo.insert_interaction,
@@ -190,7 +212,6 @@ async def run() -> None:
         generate_followup_message,
     ]
 
-    # Launch all workers
     # Launch all workers concurrently
     worker_tasks = [
         asyncio.create_task(
@@ -205,23 +226,30 @@ async def run() -> None:
             _serve_queue(client, RAG_QUEUE, rag_workflows, rag_activities),
             name="rag",
         ),
-        # 👇 Add this new worker
         asyncio.create_task(
             _serve_queue(client, "followup-q", followup_workflows, followup_activities),
             name="followup",
         ),
     ]
-    
+
     log.info(
-        "✅ Worker queues initialized: campaigns=%s, ai-match=%s, rag=%s",
-        TASK_QUEUE, AI_MATCH_QUEUE, RAG_QUEUE,
+        "✅ Worker queues initialized: campaigns=%s, ai-match=%s, rag=%s, followup=%s",
+        TASK_QUEUE,
+        AI_MATCH_QUEUE,
+        RAG_QUEUE,
+        "followup-q",
     )
 
     for t in worker_tasks:
-        t.add_done_callback(lambda task: (
-            log.exception("Worker %s exited with: %s", task.get_name(), task.exception())
-            if task.exception() else None
-        ))
+        t.add_done_callback(
+            lambda task: (
+                log.exception(
+                    "Worker %s exited with: %s", task.get_name(), task.exception()
+                )
+                if task.exception()
+                else None
+            )
+        )
 
     try:
         await stop_event.wait()
@@ -232,6 +260,7 @@ async def run() -> None:
         await asyncio.gather(*worker_tasks, return_exceptions=True)
         log.info("✅ All workers stopped cleanly.")
 
+
 # --------------------------------------------------------------------------
 # Development Simulation Mode
 # --------------------------------------------------------------------------
@@ -241,13 +270,15 @@ MOCK_COMMUNICATION = os.getenv("MOCK_COMMUNICATION", "false").lower() == "true"
 if ENVIRONMENT in ("local", "development", "test") or MOCK_COMMUNICATION:
     log.warning("🧪 Running in DEV SIMULATION MODE — using mock communication activities")
     try:
-        from app.orchestrator.temporal.activities.sms_send_dev import sms_send as sms_send
-        from app.orchestrator.temporal.activities.email_send_dev import email_send as email_send
-        from app.orchestrator.temporal.activities.voice_start_dev import voice_start as voice_start
+        # Rebind live providers to dev/mocked versions
+        from app.orchestrator.temporal.activities.sms_send_dev import sms_send as sms_send  # type: ignore[redefinition]
+        from app.orchestrator.temporal.activities.email_send_dev import email_send as email_send  # type: ignore[redefinition]
+        from app.orchestrator.temporal.activities.voice_start_dev import voice_start as voice_start  # type: ignore[redefinition]
     except ImportError as e:
         log.error(f"⚠️ Failed to import mock activities: {e}")
 else:
     log.info("📡 Using live communication providers for SMS, Email, and Voice.")
+
 
 # --------------------------------------------------------------------------
 # CLI Entrypoint
