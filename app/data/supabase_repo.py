@@ -102,7 +102,7 @@ async def patch(table: str, query: str, json_body: dict):
 
 
 # ===============================================================
-#  Voice Conversation / Synthflow Support
+#  Voice Conversation / Synthflow Support + Appointments
 # ===============================================================
 
 class SupabaseRepo:
@@ -160,15 +160,75 @@ class SupabaseRepo:
         query = f"id=eq.{step_id}"
         return await patch("lead_campaign_steps", query, body)
 
-    async def create_appointment_task(self, lead_id: str):
-        """Create a handoff/appointment task for ready-to-enroll leads."""
+    # --- Appointment Helpers ----------------------------------------------
+
+    async def insert_appointment(
+        self,
+        *,
+        registration_id: Optional[str],
+        lead_id: Optional[str],
+        project_id: Optional[str],
+        campaign_id: Optional[str],
+        scheduled_for: datetime,
+        assigned_to: Optional[str] = None,
+        outcome: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> dict:
+        """
+        Insert a new appointment row into public.appointments.
+
+        This is the main helper used by AppointmentSchedulerAgent /
+        BookAppointmentWorkflow. Actual calendar booking (Synthflow, Google,
+        etc.) can pass external details via `notes` or your own metadata column
+        if you add one later.
+        """
         payload = {
+            "registration_id": registration_id,
             "lead_id": lead_id,
-            "type": "appointment_request",
-            "status": "pending",
+            "project_id": project_id,
+            "campaign_id": campaign_id,
+            "scheduled_for": scheduled_for.isoformat(),
+            "assigned_to": assigned_to,
+            "outcome": outcome,
+            "notes": notes,
             "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
         }
-        return await insert("handoff_tasks", payload)
+        # Filter out None so Supabase can apply defaults
+        payload = {k: v for k, v in payload.items() if v is not None}
+        return await insert("appointments", payload)
+
+    async def create_appointment_task(
+        self,
+        lead_id: str,
+        scheduled_for: Optional[datetime] = None,
+        project_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        notes: Optional[str] = None,
+    ):
+        """
+        Backwards-compatible helper used by VoiceConversationAgent._notify_workflow.
+
+        Previously this wrote to a hypothetical `handoff_tasks` table. Now it
+        creates a minimal appointment record in `public.appointments` so the
+        rest of the system has a concrete object to work with.
+
+        If you later wire in BookAppointmentWorkflow, this can be replaced by
+        a call to that workflow instead of a direct insert.
+        """
+        scheduled_for = scheduled_for or datetime.utcnow()
+        payload = {
+            "registration_id": None,  # can be backfilled later
+            "lead_id": lead_id,
+            "project_id": project_id,
+            "campaign_id": campaign_id,
+            "scheduled_for": scheduled_for.isoformat(),
+            "notes": notes or "Auto-created appointment task for ready_to_enroll lead.",
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        payload = {k: v for k, v in payload.items() if v is not None}
+        return await insert("appointments", payload)
 
 
 # ===============================================================
