@@ -1,4 +1,4 @@
-# sms_sender.py  (patched)
+# app/channels/sms_sender.py
 import os
 import asyncio
 import inspect
