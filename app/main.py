@@ -11,7 +11,10 @@ from typing import Callable, Optional
 from fastapi import FastAPI
 from app.web.webhook import router as webhook_router
 
+from app.web.sms_webhook import router as sms_router
+
 app = FastAPI(title="Cory API")
+app.include_router(sms_router)
 
 # Mount the webhook routes
 app.include_router(webhook_router)
