@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 # 🔐 Shared secret (rotated in real environments)
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "dev-secret-key")
-print(f"[DEBUG] Using WEBHOOK_SECRET={WEBHOOK_SECRET!r}")
+# print(f"[DEBUG] Using WEBHOOK_SECRET={WEBHOOK_SECRET!r}")
 
 # 🧠 Simple in-memory nonce cache for replay protection
 USED_NONCES = {}
