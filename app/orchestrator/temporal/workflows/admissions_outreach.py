@@ -8,8 +8,12 @@ Simulates a timed outreach sequence for a single lead:
     call → SMS → call → email → escalation
 
 Each step can be interrupted by an inbound reply signal.
-This workflow is mainly used for simulation / demos and
-does not yet implement full intent-based branching.
+
+Ticket 9 notes:
+- This workflow can now consider an intent / next_action that may have
+  been set upstream (e.g., from lead_campaign_steps via an orchestrator).
+- If a decisive intent is present (ready_to_enroll, not_interested, etc.)
+  we short-circuit the full sequence accordingly.
 """
 
 from __future__ import annotations
@@ -73,6 +77,9 @@ class AdmissionsOutreachWorkflow:
 
         Args:
             lead: dict with at least {"name", "phone", "email"} keys.
+                  For Ticket 9, the caller may also pass:
+                    - "intent": one of the shared intents
+                    - "next_action": follow-up hint from campaign logic
 
         Returns:
             One of:
@@ -87,7 +94,41 @@ class AdmissionsOutreachWorkflow:
         phone = lead.get("phone")
         email = lead.get("email")
 
-        logger.info("🎓 Starting Admissions Outreach Workflow for %s", name)
+        # Ticket 9: optional upstream routing hints
+        intent = lead.get("intent")
+        next_action = lead.get("next_action")
+
+        logger.info(
+            "🎓 Starting Admissions Outreach Workflow for %s (intent=%s, next_action=%s)",
+            name,
+            intent,
+            next_action,
+        )
+
+        # ------------------------------------------------------------------
+        # 🔀 Ticket 9: simple early branching based on existing intent
+        # ------------------------------------------------------------------
+        # If upstream logic (e.g. ConversationalResponseAgent + DB) has
+        # already classified this lead, we can short-circuit the outreach.
+        if intent == "not_interested":
+            logger.info(
+                "🚫 Lead %s already classified as not_interested, skipping outreach.",
+                name,
+            )
+            return "stopped_due_to_reply"
+
+        if intent == "ready_to_enroll":
+            logger.info(
+                "✅ Lead %s already ready_to_enroll, letting appointment flows handle it.",
+                name,
+            )
+            # In the broader system, BookAppointmentWorkflow / callback flows
+            # would be triggered by the orchestrator based on this intent.
+            return "completed"
+
+        # Other intents (interested_but_not_ready, unsure_or_declined,
+        # callback_requested, voicemail, unclassified) fall through to the
+        # normal outreach pattern for now.
 
         # 1️⃣ First phone call
         call_result_1 = await workflow.execute_activity(

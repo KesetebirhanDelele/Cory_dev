@@ -1,144 +1,143 @@
-﻿from temporalio import activity
-from typing import Dict, Any
+﻿# app/orchestrator/temporal/activities/email_send_dev.py
+from __future__ import annotations
+
+import asyncio
 import logging
+import os
+import smtplib
+from email.message import EmailMessage
+from typing import Any, Dict, Tuple
 
-from app.channels.providers import email as email_client
-from app.data import supabase_repo as repo
-from app.policy.guards import evaluate_policy_guards
-from app.policy.guards_budget import evaluate_budget_caps
-from app.data.telemetry import log_decision_to_audit  # optional
-from app.data.db import supabase  # your db helper in app/data/db.py
+from temporalio import activity
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("cory.email.dev")
+
+# ---------------------------------------------------------------------------
+# Gmail SMTP configuration (set these in your .env)
+# ---------------------------------------------------------------------------
+SMTP_HOST = os.getenv("GMAIL_SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("GMAIL_SMTP_PORT", "587"))
+SMTP_USER = os.getenv("GMAIL_USERNAME") or os.getenv("GMAIL_USER")
+SMTP_PASS = os.getenv("GMAIL_APP_PASSWORD")
+
+
+def _build_email(to_email: str, subject: str, body: str) -> EmailMessage:
+    msg = EmailMessage()
+    msg["From"] = SMTP_USER
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.set_content(body)
+    return msg
+
+
+def _send_sync_email(to_email: str, subject: str, body: str) -> None:
+    """Blocking SMTP send; called via run_in_executor from the async activity."""
+    msg = _build_email(to_email, subject, body)
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
+        smtp.starttls()
+        smtp.login(SMTP_USER, SMTP_PASS)
+        smtp.send_message(msg)
+
+
+async def _send_email_via_gmail(to_email: str, subject: str, body: str) -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _send_sync_email, to_email, subject, body)
+
+
+def _normalize_args(*args, **kwargs) -> Tuple[str | None, Dict[str, Any]]:
+    """
+    Support both call styles:
+
+    1) Legacy dev usage:
+           email_send("user@example.com", "Subject", "Body")
+
+    2) Activity usage (matches real email_send):
+           email_send("enr_123", {"to": "...", "subject": "...", "body": "..."})
+    """
+    enrollment_id: str | None = None
+    payload: Dict[str, Any] = {}
+
+    # Pattern 2: (enrollment_id, payload_dict)
+    if len(args) == 2 and isinstance(args[0], str) and isinstance(args[1], dict):
+        enrollment_id = args[0]
+        payload = args[1]
+        return enrollment_id, payload
+
+    # Pattern 1: (recipient, subject, body)
+    if len(args) == 3 and all(isinstance(a, str) for a in args):
+        recipient, subject, body = args
+        payload = {"to": recipient, "subject": subject, "body": body}
+        return enrollment_id, payload
+
+    # Fallback to kwargs if present
+    enrollment_id = kwargs.get("enrollment_id")
+    payload = kwargs.get("payload", {})
+    return enrollment_id, payload
 
 
 @activity.defn(name="email_send")
-async def email_send(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+async def email_send(*args, **kwargs) -> Dict[str, Any]:
     """
-    Send an email through the configured Mandrill provider.
-    Enforces quiet hours, consent, frequency, and budget/rate caps before sending.
+    DEV email activity.
 
-    payload example:
-    {
-        "lead": {...},
-        "organization": {...},
-        "to": "user@example.edu",
-        "template": "welcome_template",
-        "variables": {"first_name": "Alex"},
-        "subject": "Welcome to Admissions!",
-        "campaign_id": "CAMP123"
-    }
+    In dev / local environments this is used instead of the Mandrill-backed
+    implementation. It sends real emails via Gmail SMTP using your
+    GMAIL_USERNAME + GMAIL_APP_PASSWORD.
     """
-    channel = "email"
-    lead = payload.get("lead", {})
-    org = payload.get("organization", {})
-    campaign_id = payload.get("campaign_id")
+    enrollment_id, payload = _normalize_args(*args, **kwargs)
 
-    # --- Acquire DB connection or pool -------------------------------------
-    db = supabase
-
-    # --- Policy Guard Check (C2.1: quiet/consent/frequency) -----------------
-    allowed, reason = await evaluate_policy_guards(db, lead, org, channel)
-    if not allowed:
-        logger.info(
-            "SendBlockedPolicy",
-            extra={
-                "enrollment_id": enrollment_id,
-                "lead_id": lead.get("id"),
-                "channel": channel,
-                "reason": reason,
-            },
-        )
-        await log_decision_to_audit(lead.get("id"), channel, reason)
-        return {
-            "channel": channel,
-            "enrollment_id": enrollment_id,
-            "status": "blocked",
-            "reason": reason,
-            "stage": "policy_guard",
-            "request": payload,
-        }
-
-    # --- Budget / Rate Cap Check (C2.2) ------------------------------------
-    allowed, reason, hint = await evaluate_budget_caps(
-        db=db,
-        campaign_id=campaign_id,
-        channel=channel,
-        policy=org.get("policy", {}),
+    to_email = (
+        payload.get("to")
+        or payload.get("email")
+        or payload.get("recipient")
     )
-    if not allowed:
-        logger.info(
-            "SendBlockedBudget",
-            extra={
-                "enrollment_id": enrollment_id,
-                "campaign_id": campaign_id,
-                "channel": channel,
-                "reason": reason,
-                "hint": hint,
-            },
-        )
-        await log_decision_to_audit(lead.get("id"), channel, reason)
+    subject = payload.get("subject") or "Cory Test Email"
+    body = payload.get("body") or payload.get("text") or "Hello from Cory dev."
+
+    if not to_email:
+        logger.warning("[EMAIL_DEV] No recipient email in payload: %r", payload)
         return {
-            "channel": channel,
-            "enrollment_id": enrollment_id,
-            "campaign_id": campaign_id,
-            "status": "blocked",
-            "reason": reason,
-            "hint": hint,
-            "stage": "budget_guard",
-            "request": payload,
-        }
-
-    # --- Provider Send ------------------------------------------------------
-    try:
-        ref = await email_client.send_email(
-            to_email=payload["to"],
-            subject=payload.get("subject"),
-            template_name=payload.get("template"),
-            variables=payload.get("variables", {}),
-        )
-
-        # Optional: record outbound for telemetry/audit
-        try:
-            await repo.log_outbound(
-                enrollment_id=enrollment_id,
-                channel=channel,
-                provider_ref=ref,
-            )
-        except Exception as log_ex:
-            logger.warning("OutboundLogFailed", extra={"error": str(log_ex)})
-
-        logger.info(
-            "EmailDispatched",
-            extra={
-                "enrollment_id": enrollment_id,
-                "lead_id": lead.get("id"),
-                "provider_ref": ref,
-                "status": "sent",
-            },
-        )
-        return {
-            "channel": channel,
-            "enrollment_id": enrollment_id,
-            "provider_ref": ref,
-            "status": "sent",
-            "request": payload,
-        }
-
-    except Exception as e:
-        logger.error(
-            "EmailError",
-            extra={
-                "enrollment_id": enrollment_id,
-                "lead_id": lead.get("id"),
-                "error": str(e),
-            },
-            exc_info=True,
-        )
-        return {
-            "channel": channel,
+            "channel": "email",
             "enrollment_id": enrollment_id,
             "status": "failed",
+            "error": "missing_recipient",
+            "request": payload,
+        }
+
+    # If SMTP creds aren't configured, don't crash – behave like a mock.
+    if not (SMTP_USER and SMTP_PASS):
+        logger.warning(
+            "[EMAIL_DEV] SMTP credentials not set; pretending to send email "
+            "to %s (set GMAIL_USERNAME and GMAIL_APP_PASSWORD to send for real).",
+            to_email,
+        )
+        await asyncio.sleep(1)
+        return {
+            "channel": "email",
+            "enrollment_id": enrollment_id,
+            "status": "sent",
+            "provider": "gmail-dev-mock",
+            "request": payload,
+        }
+
+    try:
+        await _send_email_via_gmail(to_email, subject, body)
+        logger.info("[EMAIL_DEV] Sent email to %s subject=%s", to_email, subject)
+        return {
+            "channel": "email",
+            "enrollment_id": enrollment_id,
+            "status": "sent",
+            "provider": "gmail",
+            "request": payload,
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.error("[EMAIL_DEV] Error sending email: %s", e, exc_info=True)
+        return {
+            "channel": "email",
+            "enrollment_id": enrollment_id,
+            "status": "failed",
+            "provider": "gmail",
             "error": str(e),
             "request": payload,
         }

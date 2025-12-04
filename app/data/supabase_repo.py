@@ -266,6 +266,21 @@ class SupabaseRepo:
             return rows[0]
         return rows
 
+    # --- Re-engagement Campaign Helpers (Ticket 8) ------------------------
+
+    async def schedule_reengagement_touch(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Insert a scheduled re-engagement touch row.
+
+        For now, we also use the same `scheduled_emails` (or generic scheduled
+        outbound table) as nurture; the calling code can differentiate by
+        campaign_id or any extra fields in `payload`.
+        """
+        rows = await insert("scheduled_emails", payload)
+        if isinstance(rows, list) and rows:
+            return rows[0]
+        return rows
+
 
 # ===============================================================
 #  Generic Logging & RPCs

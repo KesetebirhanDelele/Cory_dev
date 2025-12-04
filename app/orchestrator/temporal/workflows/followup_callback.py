@@ -11,9 +11,9 @@ from temporalio import workflow
 from app.agents.followup_scheduler_agent import FollowUpSchedulerAgent
 from app.agents.voice_conversation_agent import VoiceConversationAgent
 from app.data.supabase_repo import SupabaseRepo
-from app.orchestrator.temporal.activities.sms_send import send_sms  # adjust to your actual name
-from app.orchestrator.temporal.activities.email_send import send_email  # adjust
-from app.orchestrator.temporal.activities.voice_start import start_voice_call  # adjust
+from app.orchestrator.temporal.activities.sms_send import sms_send  # adjust to your actual name
+from app.orchestrator.temporal.activities.email_send import email_send
+from app.orchestrator.temporal.activities.voice_start import voice_start  # adjust
 
 
 @dataclass
@@ -59,7 +59,7 @@ class CallbackFollowupWorkflow:
 
             if step.channel == "sms":
                 await workflow.execute_activity(
-                    send_sms,
+                    sms_send,
                     {
                         "project_id": inp.project_id,
                         "enrollment_id": inp.enrollment_id,
@@ -73,7 +73,7 @@ class CallbackFollowupWorkflow:
                 # Reuse the existing voice_start activity which internally
                 # calls VoiceConversationAgent and Synthflow
                 await workflow.execute_activity(
-                    start_voice_call,
+                    voice_start,
                     {
                         "org_id": inp.org_id,
                         "enrollment_id": inp.enrollment_id,
@@ -86,7 +86,7 @@ class CallbackFollowupWorkflow:
 
             elif step.channel == "email":
                 await workflow.execute_activity(
-                    send_email,
+                    email_send,
                     {
                         "project_id": inp.project_id,
                         "enrollment_id": inp.enrollment_id,
