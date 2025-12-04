@@ -1,7 +1,7 @@
 # app/data/supabase_repo.py
 from __future__ import annotations
 import os, json, httpx
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from temporalio import activity
@@ -102,7 +102,7 @@ async def patch(table: str, query: str, json_body: dict):
 
 
 # ===============================================================
-#  Voice Conversation / Synthflow Support + Appointments
+#  Voice Conversation / Synthflow Support + Appointments + Nurture
 # ===============================================================
 
 class SupabaseRepo:
@@ -229,6 +229,57 @@ class SupabaseRepo:
         }
         payload = {k: v for k, v in payload.items() if v is not None}
         return await insert("appointments", payload)
+
+    # --- Nurture Campaign Helpers (Ticket 7) -------------------------------
+
+    async def get_campaign_steps(self, campaign_id: str) -> List[Dict[str, Any]]:
+        """
+        Fetch ordered nurture campaign steps for a given campaign.
+
+        Expects a `nurture_steps` (or similarly named) table with:
+          - campaign_id
+          - step_number
+          - template_id
+          - delay_minutes (optional)
+        """
+        url, key, schema = _cfg()
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{url}/rest/v1/nurture_steps"
+                f"?campaign_id=eq.{campaign_id}&order=step_number.asc",
+                headers={**_headers(key), "Accept-Profile": schema},
+            )
+        _raise_if_transient(r.status_code, r.text)
+        r.raise_for_status()
+        data = r.json()
+        return data or []
+
+    async def schedule_nurture_email(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Insert a scheduled nurture email row.
+
+        Expects a `scheduled_emails` (or equivalent) table which stores
+        scheduled outbound nurture messages.
+        """
+        rows = await insert("scheduled_emails", payload)
+        if isinstance(rows, list) and rows:
+            return rows[0]
+        return rows
+
+    # --- Re-engagement Campaign Helpers (Ticket 8) ------------------------
+
+    async def schedule_reengagement_touch(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Insert a scheduled re-engagement touch row.
+
+        For now, we also use the same `scheduled_emails` (or generic scheduled
+        outbound table) as nurture; the calling code can differentiate by
+        campaign_id or any extra fields in `payload`.
+        """
+        rows = await insert("scheduled_emails", payload)
+        if isinstance(rows, list) and rows:
+            return rows[0]
+        return rows
 
 
 # ===============================================================
