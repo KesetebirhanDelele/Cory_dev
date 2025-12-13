@@ -1,12 +1,16 @@
 # app/web/server.py
 # ---------------------------------------------------------------------------
-# ✅ Cory Admissions Web Server Entrypoint
+# 🚀 Cory Admissions Web Server Entrypoint (Stable + Safe)
 # ---------------------------------------------------------------------------
 
-# 🔹 1. Load environment early (critical for SUPABASE_URL, Temporal, etc.)
 import os
+from datetime import datetime, timezone
+
 from dotenv import load_dotenv, find_dotenv
 
+# --------------------------------------------------------------
+# 1) Load .env before anything else
+# --------------------------------------------------------------
 dotenv_path = find_dotenv(usecwd=True)
 if dotenv_path:
     load_dotenv(dotenv_path, override=True)
@@ -14,10 +18,11 @@ if dotenv_path:
 else:
     print("[BOOTSTRAP] ⚠️ No .env file found — using system environment")
 
-# 🔹 2. Continue with normal imports AFTER env vars are loaded
+# --------------------------------------------------------------
+# After env vars → import everything else
+# --------------------------------------------------------------
 import uvicorn
-from datetime import datetime, timezone
-from fastapi import FastAPI
+from fastapi import FastAPI, Request  # noqa: F401  (Request is used in routers)
 
 from app.web.middleware import setup_middleware
 from app.web.idempotency_cache import IdempotencyCache
@@ -30,25 +35,42 @@ from app.web.routes_handoffs import router as handoffs_router
 from app.web.routes_kpi import router as kpi_router
 from app.web import metrics
 
-
-# ✅ Temporal bridge (must be imported after .env load)
+# Temporal bridge
 from app.orchestrator.temporal.signal_bridge import send_temporal_signal
-from app.orchestrator.temporal import signal_bridge  # sub-app
+from app.orchestrator.temporal import signal_bridge
+
 
 # ---------------------------------------------------------------------------
-# ✅ Application Factory
+# 2) APPLICATION FACTORY
 # ---------------------------------------------------------------------------
 def create_app() -> FastAPI:
-    """Initialize FastAPI web app with all routers, middleware, and bridge."""
     app = FastAPI(title="Cory Admissions Web API")
 
-    # ✅ Mount Temporal bridge (exposes /bridge endpoints)
-    app.mount("/bridge", signal_bridge.app)
+    # ----------------------------------------------------------
+    # 🌐 Temporal Client Initialization
+    # ----------------------------------------------------------
+    from temporalio.client import Client
 
-    # ✅ Middleware setup
+    @app.on_event("startup")
+    async def startup_temporal():
+        try:
+            temporal_host = os.getenv("TEMPORAL_HOST_URL", "localhost:7233")
+            print(f"[SERVER] Connecting to Temporal at {temporal_host} ...")
+
+            app.state.temporal_client = await Client.connect(temporal_host)
+
+            print("[SERVER] ✅ Temporal client connected")
+
+        except Exception as e:
+            print("🚨 TEMPORAL STARTUP FAILED:", e)
+            raise  # do NOT swallow errors silently
+
+    # ----------------------------------------------------------
+    # ROUTES & MIDDLEWARE
+    # ----------------------------------------------------------
+    app.mount("/bridge", signal_bridge.app)
     setup_middleware(app)
 
-    # ✅ Routers (SMS, Email, Voice, WhatsApp, KPI, etc.)
     app.include_router(webhook_router)
     app.include_router(sms_router)
     app.include_router(email_router)
@@ -58,29 +80,46 @@ def create_app() -> FastAPI:
     app.include_router(kpi_router)
     app.include_router(metrics.router)
 
-    # ✅ Health check
+    # ----------------------------------------------------------
+    # HEALTH CHECK
+    # ----------------------------------------------------------
     @app.get("/healthz")
     def healthz():
-        return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+        return {
+            "status": "ok",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
-    # ✅ Idempotency cache (shared across webhook handlers)
+    # ----------------------------------------------------------
+    # Idempotency cache shared by all webhook handlers
+    # ----------------------------------------------------------
     idempotency_cache = IdempotencyCache(ttl_seconds=300)
     app.state.idempotency = idempotency_cache
     app.state.processed_refs = idempotency_cache
 
-    # ✅ Temporal signal handler bridge
+    # ----------------------------------------------------------
+    # 🌉 Event → Temporal Signal Bridge
+    # ----------------------------------------------------------
     async def process_event(channel: str, event):
         """
-        Send incoming events (SMS/email/etc.) into Temporal workflows.
+        Called by SMS, email, WhatsApp, etc. to push inbound
+        events into running Temporal workflows.
         """
-        workflow_id = (
-            event.metadata.get("workflow_id")
-            or event.payload.get("workflow_id")
-            or "default-workflow"
-        )
-        event_dict = event.model_dump()
-        success = await send_temporal_signal(workflow_id, event_dict)
-        return success
+        try:
+            workflow_id = (
+                event.metadata.get("workflow_id")
+                or event.payload.get("workflow_id")
+                or "default-workflow"
+            )
+
+            event_dict = event.model_dump()
+            success = await send_temporal_signal(workflow_id, event_dict)
+
+            return success
+
+        except Exception as e:
+            print("🚨 FAILED SENDING TEMPORAL SIGNAL:", e)
+            return False
 
     app.state.process_event_fn = process_event
 
@@ -88,11 +127,20 @@ def create_app() -> FastAPI:
 
 
 # ---------------------------------------------------------------------------
-# ✅ App Export for Uvicorn and Tests
+# 3) EXPORT APP
 # ---------------------------------------------------------------------------
 app = create_app()
 
+
+# ---------------------------------------------------------------------------
+# 4) DEVELOPMENT ENTRYPOINT
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     print(f"🚀 Starting Cory Web API on http://localhost:{port}")
-    uvicorn.run("app.web.server:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run(
+        "app.web.server:app",
+        host="0.0.0.0",
+        port=port,
+        reload=True,
+    )

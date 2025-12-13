@@ -1,5 +1,6 @@
 ﻿# app/orchestrator/temporal/worker.py
 from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -8,18 +9,29 @@ import sys
 from typing import List
 
 from dotenv import load_dotenv, find_dotenv
+
+# --------------------------------------------------------------------------
+# 0) Load .env as early as possible
+# --------------------------------------------------------------------------
+dotenv_path = find_dotenv(usecwd=True)
+if dotenv_path:
+    load_dotenv(dotenv_path, override=True)
+    print(f"[BOOTSTRAP] Loaded .env from {dotenv_path}")
+else:
+    print("[BOOTSTRAP] ⚠️ No .env file found for worker — using system environment")
+
 from temporalio.client import Client
 from temporalio.worker import Worker
+
 from app.common.tracing import setup_logging
 
-# Workflows
-from app.orchestrator.temporal.workflows.answer_builder import AnswerWorkflow
-from app.orchestrator.temporal.workflows.campaign import CampaignWorkflow
-from app.orchestrator.temporal.workflows.handoff import HandoffWorkflow
-from app.orchestrator.temporal.workflows.program_match import ProgramMatchWf
-from app.orchestrator.temporal.workflows.simulated_followup import SimulatedFollowupWorkflow
-from app.orchestrator.temporal.workflows.followup_callback import CallbackFollowupWorkflow
-from app.orchestrator.temporal.workflows.book_appointment_workflow import BookAppointmentWorkflow
+# Workflow registry
+from app.orchestrator.temporal.workflows.workflow_registry import WORKFLOWS
+
+from app.orchestrator.temporal.workflows.missed_call_followup import (
+    MissedCallFollowupWorkflow,
+)
+from app.orchestrator.temporal.activities.nurture_enroll import nurture_enroll
 
 # Activities
 from app.orchestrator.temporal.activities.sms_send import sms_send
@@ -30,130 +42,74 @@ from app.orchestrator.temporal.activities.handoff_create import (
     resolve_handoff_rpc,
     mark_timed_out,
 )
-from app.orchestrator.temporal.activities.appointment_book import book_appointment
+from app.orchestrator.temporal.activities.appointment_book import (
+    book_appointment_activity,
+)
 from app.orchestrator.temporal.activities import (
-    rag_retrieve,
+    rag,
     rag_redact,
     rag_compose,
     rag_route,
+    sms_summarize,
     program_match as match_acts,
 )
-from app.data import supabase_repo as repo
+
 from app.agents.enroll_agent import generate_followup_message
+from app.data.supabase_repo import patch_activity
 
 # --------------------------------------------------------------------------
-# Environment and Logging Setup
+# Environment / constants
 # --------------------------------------------------------------------------
-load_dotenv(find_dotenv(usecwd=True), override=False)
-print(f"[BOOTSTRAP] Loaded .env from {find_dotenv(usecwd=True)}")
-
 log = logging.getLogger("cory.worker")
 
-# --------------------------------------------------------------------------
-# Temporal Configuration
-# --------------------------------------------------------------------------
-try:
-    from app.orchestrator.temporal.config import (
-        TEMPORAL_TARGET as _CFG_TARGET,
-        TEMPORAL_NAMESPACE as _CFG_NAMESPACE,
-        TASK_QUEUE as _CFG_TASK_QUEUE,
-        AI_MATCH_QUEUE as _CFG_AI_MATCH_QUEUE,
-        RAG_QUEUE as _CFG_RAG_QUEUE,
-    )
+CAMPAIGN_QUEUE = "cory-handoff-queue"
+AI_MATCH_QUEUE = "ai-match-q"
+RAG_QUEUE = "rag-q"
+FOLLOWUP_QUEUE = "followup-q"
 
-    TEMPORAL_TARGET = _CFG_TARGET
-    TEMPORAL_NAMESPACE = _CFG_NAMESPACE
-    TASK_QUEUE = _CFG_TASK_QUEUE
-    AI_MATCH_QUEUE = _CFG_AI_MATCH_QUEUE
-    RAG_QUEUE = _CFG_RAG_QUEUE
+TEMPORAL_TARGET = os.getenv("TEMPORAL_TARGET", "localhost:7233")
+TEMPORAL_NAMESPACE = os.getenv("TEMPORAL_NAMESPACE", "default")
 
-except Exception:
-    TEMPORAL_TARGET = os.getenv("TEMPORAL_TARGET", "127.0.0.1:7233")
-    TEMPORAL_NAMESPACE = os.getenv("TEMPORAL_NAMESPACE", "default")
-    TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "cory-campaigns")
-    AI_MATCH_QUEUE = os.getenv("AI_MATCH_QUEUE", "ai-match-q")
-    RAG_QUEUE = os.getenv("RAG_QUEUE", "rag-q")
 
 # --------------------------------------------------------------------------
-# Helper Functions
+# Helpers
 # --------------------------------------------------------------------------
-async def _preflight(client: Client) -> None:
-    """Log Temporal server version."""
-    try:
-        from temporalio.api.workflowservice.v1 import GetSystemInfoRequest
-
-        info = await client.workflow_service.get_system_info(GetSystemInfoRequest())
-        log.info("Temporal server version: %s", getattr(info, "server_version", "unknown"))
-    except Exception as e:
-        log.warning("Preflight check skipped or failed: %s", e)
+async def _connect_temporal(target: str, namespace: str) -> Client:
+    log.info(f"Connecting to Temporal {namespace}@{target} ...")
+    client = await Client.connect(target, namespace=namespace)
+    log.info("Connected to Temporal server.")
+    return client
 
 
-async def _connect_temporal(
-    target: str, namespace: str, retries: int = 3, delay: int = 3
-) -> Client:
-    """Connect to Temporal with retry logic."""
-    for attempt in range(1, retries + 1):
-        try:
-            log.info(
-                "Connecting to Temporal server (%s@%s) — attempt %d/%d",
-                namespace,
-                target,
-                attempt,
-                retries,
-            )
-            client = await Client.connect(target, namespace=namespace)
-            log.info("Connected to Temporal server: %s", target)
-            return client
-        except Exception as e:
-            log.warning("Connection attempt %d failed: %s", attempt, e)
-            if attempt < retries:
-                await asyncio.sleep(delay)
-    raise RuntimeError(f"Failed to connect to Temporal server after {retries} attempts")
+async def _preflight(client: Client):
+    from temporalio.api.workflowservice.v1 import GetSystemInfoRequest
+
+    info = await client.workflow_service.get_system_info(GetSystemInfoRequest())
+    log.info(f"Temporal server version: {info.server_version}")
 
 
-async def _serve_queue(
-    client: Client,
-    queue_name: str,
-    workflows: List,
-    activities: List,
-) -> None:
-    """Start and run a Temporal worker for a given queue."""
+async def _serve(client: Client, queue: str, workflows: List, activities: List):
     log.info(
-        "🚀 Starting worker | queue=%s | workflows=%d | activities=%d",
-        queue_name,
-        len(workflows),
-        len(activities),
+        f"🚀 Starting worker | queue={queue} | "
+        f"workflows={len(workflows)} | activities={len(activities)}"
     )
     worker = Worker(
         client=client,
-        task_queue=queue_name,
+        task_queue=queue,
         workflows=workflows,
         activities=activities,
     )
-    try:
-        await worker.run()
-    except asyncio.CancelledError:
-        log.info("Worker on %s cancelled — shutting down gracefully", queue_name)
-    except Exception as e:
-        log.exception("Worker crashed on queue %s: %s", queue_name, e)
-        raise
+    await worker.run()
 
 
 # --------------------------------------------------------------------------
-# Main Runner
+# Main Worker Runner
 # --------------------------------------------------------------------------
 async def run() -> None:
-    """Entrypoint for Temporal workers."""
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     setup_logging()
-    log.info(
-        "🧠 Cory Temporal Worker starting | target=%s | namespace=%s | queues=%s",
-        TEMPORAL_TARGET,
-        TEMPORAL_NAMESPACE,
-        [TASK_QUEUE, AI_MATCH_QUEUE, RAG_QUEUE],
-    )
 
     client = await _connect_temporal(TEMPORAL_TARGET, TEMPORAL_NAMESPACE)
     await _preflight(client)
@@ -164,31 +120,62 @@ async def run() -> None:
         try:
             loop.add_signal_handler(sig, stop_event.set)
         except NotImplementedError:
-            # Not available on some platforms (e.g., Windows)
+            # Windows / limited environments
             pass
 
-    # Define workflow groups
-    campaigns_workflows = [
-        CampaignWorkflow,
-        HandoffWorkflow,
-        AnswerWorkflow,
-        CallbackFollowupWorkflow,   # callback / voicemail sequence
-        BookAppointmentWorkflow,    # booking confirmed appointments
+    # ------------------------
+    # Per-queue workflow groups
+    # ------------------------
+    from app.orchestrator.temporal.workflows.answer_builder import AnswerWorkflow
+    from app.orchestrator.temporal.workflows.program_match import ProgramMatchWf
+    from app.orchestrator.temporal.workflows.simulated_followup import (
+        SimulatedFollowupWorkflow,
+    )
+
+    # Determine which workflows belong to each queue
+    campaign_wfs = [
+        wf
+        for wf in WORKFLOWS
+        if wf.__name__ not in {
+            "AnswerWorkflow",
+            "ProgramMatchWf",
+            "SimulatedFollowupWorkflow",
+        }
     ]
-    campaigns_activities = [
+    # Ensure MissedCallFollowupWorkflow is on the campaign queue
+    if MissedCallFollowupWorkflow not in campaign_wfs:
+        campaign_wfs.append(MissedCallFollowupWorkflow)
+
+    rag_wfs = [AnswerWorkflow]
+    match_wfs = [ProgramMatchWf]
+    followup_wfs = [SimulatedFollowupWorkflow]
+
+    # ------------------------
+    # Activities per queue
+    # ------------------------
+    campaign_activities = [
         sms_send,
         email_send,
         voice_start,
         create_handoff,
         resolve_handoff_rpc,
         mark_timed_out,
-        repo.insert_interaction,
-        repo.patch_activity,
+        patch_activity,
         generate_followup_message,
-        book_appointment,  # appointment booking activity
+        book_appointment_activity,
+        # 🔥 New: nurture enrollment for Smart Nurture after missed calls
+        nurture_enroll,
     ]
 
-    match_workflows = [ProgramMatchWf]
+    rag_activities = [
+        rag.retrieve_chunks,
+        rag_redact.redact_enforce,
+        rag_compose.compose_answer,
+        rag_route.route,
+        sms_summarize.sms_summarize_answer,
+        sms_send,
+    ]
+
     match_activities = [
         match_acts.load_rules,
         match_acts.deterministic_score,
@@ -196,94 +183,43 @@ async def run() -> None:
         match_acts.persist_scores,
     ]
 
-    rag_workflows = [AnswerWorkflow]
-    rag_activities = [
-        rag_retrieve.retrieve_chunks,
-        rag_redact.redact_enforce,
-        rag_compose.compose_answer,
-        rag_route.route,
-    ]
-
-    # ✅ Dedicated follow-up worker group (simulated follow-up campaign)
-    followup_workflows = [SimulatedFollowupWorkflow]
     followup_activities = [
-        repo.insert_interaction,
-        repo.patch_activity,
+        patch_activity,
         generate_followup_message,
     ]
 
-    # Launch all workers concurrently
-    worker_tasks = [
+    # ------------------------
+    # Launch workers
+    # ------------------------
+    tasks = [
         asyncio.create_task(
-            _serve_queue(client, TASK_QUEUE, campaigns_workflows, campaigns_activities),
-            name="campaigns",
+            _serve(client, CAMPAIGN_QUEUE, campaign_wfs, campaign_activities),
+            name="campaign",
         ),
         asyncio.create_task(
-            _serve_queue(client, AI_MATCH_QUEUE, match_workflows, match_activities),
+            _serve(client, AI_MATCH_QUEUE, match_wfs, match_activities),
             name="ai-match",
         ),
         asyncio.create_task(
-            _serve_queue(client, RAG_QUEUE, rag_workflows, rag_activities),
+            _serve(client, RAG_QUEUE, rag_wfs, rag_activities),
             name="rag",
         ),
         asyncio.create_task(
-            _serve_queue(client, "followup-q", followup_workflows, followup_activities),
+            _serve(client, FOLLOWUP_QUEUE, followup_wfs, followup_activities),
             name="followup",
         ),
     ]
 
-    log.info(
-        "✅ Worker queues initialized: campaigns=%s, ai-match=%s, rag=%s, followup=%s",
-        TASK_QUEUE,
-        AI_MATCH_QUEUE,
-        RAG_QUEUE,
-        "followup-q",
-    )
+    log.info("✅ Worker queues initialized")
 
-    for t in worker_tasks:
-        t.add_done_callback(
-            lambda task: (
-                log.exception(
-                    "Worker %s exited with: %s", task.get_name(), task.exception()
-                )
-                if task.exception()
-                else None
-            )
-        )
-
-    try:
-        await stop_event.wait()
-        log.info("🛑 Stop signal received — shutting down workers...")
-    finally:
-        for t in worker_tasks:
-            t.cancel()
-        await asyncio.gather(*worker_tasks, return_exceptions=True)
-        log.info("✅ All workers stopped cleanly.")
+    await stop_event.wait()
+    for t in tasks:
+        t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    log.info("🛑 Workers shut down cleanly.")
 
 
-# --------------------------------------------------------------------------
-# Development Simulation Mode
-# --------------------------------------------------------------------------
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
-MOCK_COMMUNICATION = os.getenv("MOCK_COMMUNICATION", "false").lower() == "true"
-
-if ENVIRONMENT in ("local", "development", "test") or MOCK_COMMUNICATION:
-    log.warning("🧪 Running in DEV SIMULATION MODE — using mock communication activities")
-    try:
-        # Rebind live providers to dev/mocked versions
-        from app.orchestrator.temporal.activities.sms_send_dev import sms_send as sms_send  # type: ignore[redefinition]
-        from app.orchestrator.temporal.activities.email_send_dev import email_send as email_send  # type: ignore[redefinition]
-        from app.orchestrator.temporal.activities.voice_start_dev import voice_start as voice_start  # type: ignore[redefinition]
-    except ImportError as e:
-        log.error(f"⚠️ Failed to import mock activities: {e}")
-else:
-    log.info("📡 Using live communication providers for SMS, Email, and Voice.")
-
-
-# --------------------------------------------------------------------------
-# CLI Entrypoint
-# --------------------------------------------------------------------------
-def main() -> None:
+def main():
     try:
         asyncio.run(run())
     except KeyboardInterrupt:

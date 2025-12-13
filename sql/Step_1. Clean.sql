@@ -532,4 +532,208 @@ SELECT
 FROM public.enrollment e
 LIMIT 1;
 
+INSERT INTO public.lead_campaign_steps
+(registration_id, step_order, step_name, step_type, channel, direction, status)
+VALUES
+('63db5123-02f6-4486-b11a-02bbc16fcc8f', 50, 'sms: missed_call_1', 'sms', 'sms', 'outbound', 'pending'),
+('63db5123-02f6-4486-b11a-02bbc16fcc8f', 51, 'sms: missed_call_2', 'sms', 'sms', 'outbound', 'pending');
+
+ALTER TABLE public.lead_campaign_steps
+ADD COLUMN IF NOT EXISTS is_system boolean DEFAULT false;
+
+UPDATE public.lead_campaign_steps
+SET is_system = true
+WHERE step_name IN ('sms: missed_call_1', 'sms: missed_call_2');
+
+INSERT INTO public.template (id, project_id, name, channel)
+VALUES
+(gen_random_uuid(), '22222222-2222-2222-2222-222222222222', 'Missed Call SMS #1', 'sms'),
+(gen_random_uuid(), '22222222-2222-2222-2222-222222222222', 'Missed Call SMS #2', 'sms');
+
+INSERT INTO public.template_variant (template_id, name, content)
+VALUES
+('8c13760d-0cd1-4ead-bf57-8e88f5de7e95', 'default', '{"body": "Hi, I just called you and missed you. I’ll try again shortly!"}'),
+('02afad2c-1899-4c42-965f-a73e3c82081d', 'default', '{"body": "Still trying to reach you — will call again soon!"}');
+
+INSERT INTO doc_chunks (id, doc_id, content, embedding, metadata, org_id)
+VALUES
+-- Colaberry programs overview
+(
+  4,
+  '5e072e1c-903e-4d34-b140-059c12c72a29',
+  'Colaberry offers industry-focused training programs in data analytics and data science, with hands-on projects and career support for students transitioning into data roles.',
+  NULL,
+  '{"section": "programs_overview", "topic": "programs"}',
+  '00000000-0000-0000-0000-000000000000'
+),
+
+-- Data Science / Data Analytics focus
+(
+  5,
+  '5e072e1c-903e-4d34-b140-059c12c72a29',
+  'The Colaberry data-focused programs teach practical skills such as SQL, Python, data visualization, statistics, and machine learning. Students build real-world portfolio projects they can show to employers.',
+  NULL,
+  '{"section": "data_programs", "topic": "data_science"}',
+  '00000000-0000-0000-0000-000000000000'
+),
+
+-- How to get registered
+(
+  6,
+  '5e072e1c-903e-4d34-b140-059c12c72a29',
+  'To get registered for a Colaberry program, you usually start by filling out a short online application form and scheduling a call with an admissions advisor. They will walk you through available programs, start dates, and payment options, then help you complete your enrollment.',
+  NULL,
+  '{"section": "registration", "topic": "how_to_register"}',
+  '00000000-0000-0000-0000-000000000000'
+),
+
+-- Who is a good fit
+(
+  7,
+  '5e072e1c-903e-4d34-b140-059c12c72a29',
+  'Colaberry programs are designed for motivated career changers and working professionals who want to move into data roles. Many students come from non-technical backgrounds and ramp up through structured training and support.',
+  NULL,
+  '{"section": "fit", "topic": "audience"}',
+  '00000000-0000-0000-0000-000000000000'
+),
+
+-- Time commitment / schedule
+(
+  8,
+  '5e072e1c-903e-4d34-b140-059c12c72a29',
+  'Most Colaberry learners study part-time while working. Programs are delivered online with live sessions and self-paced work, and many students commit several hours per week over a few months to complete the training.',
+  NULL,
+  '{"section": "schedule", "topic": "time_commitment"}',
+  '00000000-0000-0000-0000-000000000000'
+),
+
+-- Tuition / payment options (generic wording)
+(
+  9,
+  '5e072e1c-903e-4d34-b140-059c12c72a29',
+  'Tuition for Colaberry programs varies by track and duration. Payment options often include paying upfront or in installments. An admissions advisor can review exact tuition and payment choices based on the program you choose.',
+  NULL,
+  '{"section": "tuition", "topic": "financial"}',
+  '00000000-0000-0000-0000-000000000000'
+);
+
+UPDATE docs
+SET title = 'Colaberry Admissions & Programs FAQ'
+WHERE id = '5e072e1c-903e-4d34-b140-059c12c72a29';
+
+-- Create a sequence if it doesn't exist
+CREATE SEQUENCE IF NOT EXISTS doc_chunks_id_seq
+  OWNED BY doc_chunks.id;
+
+-- Set sequence to start after current max id
+SELECT setval(
+  'doc_chunks_id_seq',
+  COALESCE((SELECT max(id) FROM doc_chunks), 1),
+  true
+);
+
+-- Make id use this sequence by default
+ALTER TABLE doc_chunks
+  ALTER COLUMN id SET DEFAULT nextval('doc_chunks_id_seq');
+
+
+COMMIT;
+
+BEGIN;
+
+-- 1️⃣ Update FALL 2025 OUTREACH
+-- Phone-first campaign:
+--   Call → if missed, SMS #1 → second call → if missed, SMS #2 → then Smart Nurture (handled in workflows)
+
+UPDATE public.campaigns
+SET
+  description = 'Phone-first fall outreach: initial call, SMS reminders on missed calls, and Smart Nurture enrollment for no-shows.',
+  max_attempts = 4,
+  steps = '[
+    {"step":1,"name":"Initial Voice Call","type":"voice"},
+    {"step":2,"name":"Missed Call SMS #1","type":"sms"},
+    {"step":3,"name":"Second Voice Call","type":"voice"},
+    {"step":4,"name":"Missed Call SMS #2","type":"sms"}
+  ]'::jsonb,
+  settings = jsonb_build_object(
+    'category', 'lead',
+    'kind', 'fall_outreach',
+    'missed_call_flow', 'enabled'
+  )
+WHERE id = '77777777-7777-7777-7777-777777777771';  -- Fall 2025 Outreach
+-- org_id = 33333333-3333-3333-3333-333333333333
+
+------------------------------------------------------------------
+
+-- 2️⃣ Update REENGAGEMENT SERIES → COLD NURTURE / LONG-TERM RE-ENGAGEMENT
+-- For leads marked "not interested": 3 long-term emails over 60-day cycles (timing handled in code)
+
+UPDATE public.campaigns
+SET
+  name = 'Cold Nurture / Long-Term Re-engagement',
+  description = 'Long-term cold nurture for not-interested leads with 3 re-engagement emails over 60-day cycles.',
+  max_attempts = 3,
+  steps = '[
+    {"step":1,"name":"Re-engagement Email 1","type":"email"},
+    {"step":2,"name":"Re-engagement Email 2","type":"email"},
+    {"step":3,"name":"Re-engagement Email 3","type":"email"}
+  ]'::jsonb,
+  settings = jsonb_build_object(
+    'category', 'reengagement',
+    'kind', 'cold_nurture',
+    'cycle_days', 60
+  )
+WHERE id = '77777777-7777-7777-7777-777777777772';  -- previously "Reengagement Series"
+
+------------------------------------------------------------------
+
+-- 3️⃣ Create SMART NURTURE CAMPAIGN (15 personalized emails)
+-- For "interested but not ready / undecided" leads.
+
+INSERT INTO public.campaigns (
+    id,
+    organization_id,
+    name,
+    description,
+    is_active,
+    max_attempts,
+    policy,
+    prompts,
+    steps,
+    settings,
+    created_by
+)
+VALUES (
+    '77777777-7777-7777-7777-777777777773',              -- NEW Smart Nurture ID
+    '33333333-3333-3333-3333-333333333333',              -- Cory Admissions org
+    'Smart Nurture Campaigns',
+    '15 personalized nurture emails with resources and stories for interested-but-undecided students.',
+    TRUE,
+    15,
+    '{}'::jsonb,
+    '{}'::jsonb,
+    '[
+      {"step":1,"name":"Nurture Email 1","type":"email"},
+      {"step":2,"name":"Nurture Email 2","type":"email"},
+      {"step":3,"name":"Nurture Email 3","type":"email"},
+      {"step":4,"name":"Nurture Email 4","type":"email"},
+      {"step":5,"name":"Nurture Email 5","type":"email"},
+      {"step":6,"name":"Nurture Email 6","type":"email"},
+      {"step":7,"name":"Nurture Email 7","type":"email"},
+      {"step":8,"name":"Nurture Email 8","type":"email"},
+      {"step":9,"name":"Nurture Email 9","type":"email"},
+      {"step":10,"name":"Nurture Email 10","type":"email"},
+      {"step":11,"name":"Nurture Email 11","type":"email"},
+      {"step":12,"name":"Nurture Email 12","type":"email"},
+      {"step":13,"name":"Nurture Email 13","type":"email"},
+      {"step":14,"name":"Nurture Email 14","type":"email"},
+      {"step":15,"name":"Nurture Email 15","type":"email"}
+    ]'::jsonb,
+    jsonb_build_object(
+      'category', 'nurture',
+      'kind', 'smart_nurture'
+    ),
+    NULL  -- or a real user id from public.users
+);
+
 COMMIT;

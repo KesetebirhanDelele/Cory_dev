@@ -5,14 +5,18 @@ Synthflow Voice Provider Adapter
 Handles outbound call initiation and webhook configuration
 for Cory Admissions (via Synthflow Programmable Voice API).
 
-Now supports dynamic prompt override:
+Now supports:
 
-- Prefer vars["prompt"] as the full runtime prompt for Synthflow
-- Fallback to vars["script"] (for backward compatibility)
-- Fallback to DEFAULT_SCRIPT if neither is provided
+- Dynamic prompt override:
+    - Prefer vars["prompt"] as the full runtime prompt for Synthflow
+    - Fallback to vars["script"] (for backward compatibility)
+    - Fallback to DEFAULT_SCRIPT if neither is provided
 
-Other keys in vars (except prompt/script/lead_name) are passed as
-custom_variables so they can be referenced in the Synthflow agent.
+- Automatic context variables:
+    - org_id and enrollment_id are always injected into custom_variables
+    - Any other keys in vars (except prompt/script/lead_name) are passed as
+      custom_variables so they can be referenced in the Synthflow agent
+      and in the webhook payload.
 """
 
 import os
@@ -34,7 +38,11 @@ log = logging.getLogger("cory.voice.synthflow")
 SYNTHFLOW_KEY = os.getenv("SYNTHFLOW_API_KEY")
 SYNTHFLOW_MODEL = os.getenv("SYNTHFLOW_MODEL_ID")
 SYNTHFLOW_API_URL = os.getenv("SYNTHFLOW_API_URL", "https://api.synthflow.ai/v2/calls")
+
+# Base URL of THIS app (ngrok / local / prod), used to build the webhook URL
 CALLBACK_BASE_URL = os.getenv("CALLBACK_BASE_URL", "https://f651ebabb4f7.ngrok-free.app")
+# Path portion can be overridden without touching code, e.g. "/api/voice/transcript" or "/api/voice/events"
+CALLBACK_PATH = os.getenv("SYNTHFLOW_CALLBACK_PATH", "/api/voice/transcript")
 
 DEFAULT_SCRIPT = os.getenv(
     "SYNTHFLOW_SCRIPT",
@@ -49,11 +57,19 @@ LIVE = os.getenv("SYNTHFLOW_LIVE", "true").lower() in ("1", "true", "yes")
 # Helper: map status from Synthflow response
 # ================================================================
 def map_synthflow_status(resp_json: Dict[str, Any]) -> str:
-    """Normalize Synthflow API response status."""
+    """Normalize Synthflow API response status into our internal status."""
     if not resp_json:
         return "TEMPORARY_FAILURE"
-    if resp_json.get("call_id") or resp_json.get("id") or resp_json.get("response", {}).get("call_id"):
+
+    # If Synthflow returns a call id anywhere reasonable, treat it as "sent"
+    if (
+        resp_json.get("call_id")
+        or resp_json.get("id")
+        or resp_json.get("response", {}).get("call_id")
+    ):
         return "sent"
+
+    # Fall back to provider status or queued
     return resp_json.get("status", "queued")
 
 
@@ -71,14 +87,21 @@ async def send_voice_call(
     Initiate an outbound voice call via Synthflow API.
 
     Args:
-        org_id: Organization ID (currently informational, can be used for metadata)
-        enrollment_id: Campaign enrollment ID
+        org_id: Organization ID (informational; also injected into custom_variables)
+        enrollment_id: Campaign enrollment ID (also injected into custom_variables)
         to: Target phone number (E.164 format)
         vars: Optional dict of contextual variables for the voice agent:
               - prompt: full dynamic prompt override for Synthflow (preferred)
               - script: legacy script text (mapped to prompt if present)
               - lead_name: student name for display
+              - reason_for_call: short phrase for why Cory is calling
+              - attempt: numeric attempt count (1, 2, ...)
               - any other keys -> forwarded as custom_variables
+
+    Notes:
+        - org_id and enrollment_id are ALWAYS added to custom_variables so that
+          downstream webhooks / workflows can correlate calls even if provider_ref
+          is missing or for analytics.
     """
     if not SYNTHFLOW_KEY or not SYNTHFLOW_MODEL:
         raise RuntimeError("❌ Synthflow credentials not configured in environment")
@@ -88,11 +111,14 @@ async def send_voice_call(
 
     vars = vars or {}
 
-    callback_url = (
-        f"{CALLBACK_BASE_URL.rstrip('/')}/api/voice/transcript"
-        if CALLBACK_BASE_URL
-        else None
-    )
+    # Make sure key identifiers are always available inside the call context
+    # so they can be surfaced in webhooks and referenced by the agent.
+    vars.setdefault("org_id", org_id)
+    vars.setdefault("enrollment_id", enrollment_id)
+
+    callback_url: Optional[str] = None
+    if CALLBACK_BASE_URL:
+        callback_url = f"{CALLBACK_BASE_URL.rstrip('/')}{CALLBACK_PATH}"
 
     # 🔥 Dynamic prompt override:
     # 1) Prefer explicit vars["prompt"]
@@ -159,6 +185,7 @@ async def send_voice_call(
 
             data = resp.json()
             result["response_raw"] = data
+
             provider_ref = (
                 data.get("id")
                 or data.get("call_id")
@@ -168,9 +195,10 @@ async def send_voice_call(
             result["status"] = map_synthflow_status(data)
 
             log.info(
-                "✅ [Synthflow] Call initiated | org=%s | enrollment=%s | provider_ref=%s | status=%s",
+                "✅ [Synthflow] Call initiated | org=%s | enrollment=%s | to=%s | provider_ref=%s | status=%s",
                 org_id,
                 enrollment_id,
+                to,
                 provider_ref,
                 result["status"],
             )
