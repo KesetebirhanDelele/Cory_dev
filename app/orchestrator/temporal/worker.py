@@ -31,6 +31,9 @@ from app.orchestrator.temporal.activities.handoff_create import (
     mark_timed_out,
 )
 from app.orchestrator.temporal.activities.appointment_book import book_appointment
+from app.orchestrator.temporal.activities.email_reply_check import (
+    email_reply_check,
+)
 from app.orchestrator.temporal.activities import (
     rag_retrieve,
     rag_redact,
@@ -185,7 +188,8 @@ async def run() -> None:
         repo.insert_interaction,
         repo.patch_activity,
         generate_followup_message,
-        book_appointment,  # appointment booking activity
+        book_appointment,      # appointment booking activity
+        email_reply_check,     # NEW: check for inbound email replies
     ]
 
     match_workflows = [ProgramMatchWf]

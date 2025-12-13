@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os, json, httpx
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from temporalio import activity
 from supabase import create_client, Client
@@ -281,6 +281,51 @@ class SupabaseRepo:
             return rows[0]
         return rows
 
+    # --- Reply / Re-engagement Helpers (Ticket 10-ish) --------------------
+
+    async def has_email_reply_for_enrollment(
+        self,
+        enrollment_id: str,
+        *,
+        lookback_minutes: int = 120,
+    ) -> bool:
+        """
+        Return True if we see any inbound email message for this enrollment
+        in the last `lookback_minutes` minutes.
+
+        Assumes an inbound-email pipeline that writes rows to `message` with:
+          - enrollment_id
+          - channel = 'email'
+          - direction = 'inbound'
+          - created_at (timestamp)
+
+        If your schema differs, adjust the REST filter below.
+        """
+        url, key, schema = _cfg()
+
+        since = datetime.utcnow() - timedelta(minutes=lookback_minutes)
+        since_iso = since.isoformat()
+
+        query = (
+            f"enrollment_id=eq.{enrollment_id}"
+            "&channel=eq.email"
+            "&direction=eq.inbound"
+            f"&created_at=gte.{since_iso}"
+            "&select=id"
+            "&limit=1"
+        )
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{url}/rest/v1/message?{query}",
+                headers={**_headers(key), "Accept-Profile": schema},
+            )
+
+        _raise_if_transient(r.status_code, r.text)
+        r.raise_for_status()
+        data = r.json()
+        return bool(data)
+
 
 # ===============================================================
 #  Generic Logging & RPCs
@@ -334,6 +379,6 @@ async def patch_activity(table: str, query: str, json_body: dict):
             r.raise_for_status()
 
         return {"status": r.status_code, "data": r.json()}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"[PATCH_ACTIVITY_EXCEPTION] {type(e).__name__}: {e}")
         raise
