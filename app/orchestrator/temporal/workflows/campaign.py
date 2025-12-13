@@ -182,6 +182,64 @@ class CampaignWorkflow:
             final_event = self._event if got_signal else {"status": "timeout"}
             final_status = final_event.get("status")
 
+            # ---------------------------------------------------------
+            #  📞 Missed Call Logic (No Answer → SMS → Retry Call)
+            # ---------------------------------------------------------
+            if action == "voice_start":
+                # 1️⃣ Detect no-answer conditions
+                is_no_answer = final_status in ("timeout", "failed") or \
+                            final_event.get("intent") == "voicemail"
+
+                if is_no_answer:
+                    phone = context.get("phone")
+                    registration_id = context.get("registration_id")
+                    org_id = context.get("org_id")
+
+                    # -----------------------------
+                    # 1. Send Missed-Call SMS #1
+                    # -----------------------------
+                    await workflow.execute_activity(
+                        sms_send,
+                        args=[campaign_id, {
+                            "registration_id": registration_id,
+                            "phone": phone,
+                            "step_name": "sms: missed_call_1"
+                        }],
+                        retry_policy=rp,
+                        **opts,
+                    )
+
+                    # Wait 15 seconds before retry call
+                    await workflow.sleep(timedelta(seconds=15))
+
+                    # -----------------------------
+                    # 2. Retry the voice call
+                    # -----------------------------
+                    retry_call_event = await workflow.execute_activity(
+                        voice_start,
+                        args=[campaign_id, payload],
+                        retry_policy=rp,
+                        **opts,
+                    )
+
+                    retry_status = retry_call_event.get("status")
+
+                    # -----------------------------
+                    # 3. If second call also fails → SMS #2
+                    # -----------------------------
+                    if retry_status in ("timeout", "failed"):
+                        await workflow.execute_activity(
+                            sms_send,
+                            args=[campaign_id, {
+                                "registration_id": registration_id,
+                                "phone": phone,
+                                "step_name": "sms: missed_call_2"
+                            }],
+                            retry_policy=rp,
+                            **opts,
+                        )
+
+
             self.history.append(
                 {
                     "step": step_index,

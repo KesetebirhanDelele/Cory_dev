@@ -1,59 +1,58 @@
 # app/orchestrator/temporal/activities/rag_redact.py
 from __future__ import annotations
-from typing import Any, Dict, List
+from typing import Any, Dict
 from temporalio import activity
 import re
 
 
 @activity.defn(name="redact_enforce")
-async def redact_enforce(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+async def redact_enforce(draft: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Apply redaction policies to retrieved text chunks.
-    Removes or masks PII or sensitive terms before composition.
+    Redact PII or sensitive information from the composed answer.
 
-    Args:
-        chunks: List of document chunk dictionaries.
+    Expected input:
+        {
+            "answer": str,
+            "citations": [...]
+        }
 
     Returns:
-        List of redacted chunks (same structure).
+        {
+            "answer": str,
+            "confidence": float
+        }
     """
-    if not chunks:
-        activity.logger.info("No chunks received for redaction.")
-        return []
 
-    activity.logger.info("Starting redaction | total_chunks=%d", len(chunks))
+    answer = draft.get("answer", "")
+    if not answer:
+        activity.logger.warning("redact_enforce received empty answer")
+        return {"answer": "", "confidence": 0.0}
 
-    redacted_chunks: List[Dict[str, Any]] = []
-    total_replacements = 0
+    activity.logger.info("Starting redaction on composed answer")
 
-    # Simple redaction rules — expand these as policies evolve
+    # Basic redaction patterns
     pii_patterns = [
-        r"\b\d{3}-\d{2}-\d{4}\b",  # SSN pattern
-        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",  # Email
-        r"\b\d{10}\b",  # Plain 10-digit numbers
+        r"\b\d{3}-\d{2}-\d{4}\b",                        # SSN
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",  # Email
+        r"\b\d{10}\b",                                   # 10-digit phone
     ]
 
-    for c in chunks:
-        text = c.get("content", "")
-        original_text = text
+    redacted_text = answer
+    total_replacements = 0
 
-        for pattern in pii_patterns:
-            text, replacements = re.subn(pattern, "[REDACTED]", text)
-            total_replacements += replacements
+    for pattern in pii_patterns:
+        redacted_text, replacements = re.subn(pattern, "[REDACTED]", redacted_text)
+        total_replacements += replacements
 
-        if text != original_text:
-            activity.logger.debug("Redacted content in doc_id=%s", c.get("doc_id"))
+    if total_replacements > 0:
+        activity.logger.info("🔒 Redaction applied (%d replacements)", total_replacements)
+    else:
+        activity.logger.info("No PII found to redact in answer")
 
-        redacted_chunks.append({
-            "doc_id": c.get("doc_id"),
-            "content": text.strip(),
-            "score": c.get("score", 0)
-        })
+    # NOTE: Assigning confidence can be replaced later with a real scorer
+    confidence = draft.get("confidence", 0.85)
 
-    activity.logger.info(
-        "Redaction complete | total_chunks=%d | total_replacements=%d",
-        len(redacted_chunks),
-        total_replacements
-    )
-
-    return redacted_chunks
+    return {
+        "answer": redacted_text.strip(),
+        "confidence": confidence,
+    }

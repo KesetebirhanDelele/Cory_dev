@@ -217,6 +217,25 @@ class CampaignMessageGeneratorAgent:
         For voice, we explicitly ask the model for a natural spoken
         phone script (not an SMS or email).
         """
+        # -------------------------------------------------------------
+        # Special prompts for missed-call SMS follow-ups
+        # -------------------------------------------------------------
+        step_name = (context.get("step") or {}).get("step_name", "").lower()
+
+        if step_name == "sms: missed_call_1":
+            return (
+                "Write a short, empathetic SMS informing the student that you tried calling "
+                "and will call again shortly. Keep it under 2 short sentences. "
+                "Do not add links unless provided. Return only the SMS text."
+            )
+
+        if step_name == "sms: missed_call_2":
+            return (
+                "Write a friendly follow-up SMS after a second missed call. "
+                "Let the student know they can reply with a preferred time. "
+                "Keep it under 2 short sentences. Return only the SMS text."
+            )
+
         lead = context.get("lead", {}) or {}
         campaign = context.get("campaign", {}) or {}
         step = context.get("step", {}) or {}

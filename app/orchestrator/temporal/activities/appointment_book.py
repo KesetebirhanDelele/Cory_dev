@@ -22,7 +22,7 @@ from typing import Any, Dict, Optional
 
 from temporalio import activity
 
-from app.agents.appointment_scheduler_agent import AppointmentSchedulerAgent
+from app.agents.followup_scheduler_agent import FollowUpSchedulerAgent
 
 
 def _parse_iso_datetime(value: Optional[str]) -> datetime:
@@ -86,7 +86,7 @@ async def book_appointment_activity(payload: Dict[str, Any]) -> Dict[str, Any]:
         source,
     )
 
-    agent = AppointmentSchedulerAgent()
+    agent = FollowUpSchedulerAgent()
 
     result = await agent.schedule_from_enrollment(
         enrollment_id=enrollment_id,

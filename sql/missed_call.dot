@@ -1,0 +1,59 @@
+digraph MissedCallFlow {
+  rankdir=LR;
+  node [shape=box, style="rounded,filled", fillcolor="#f7f7f9", color="#999", fontname="Inter,Arial"];
+  edge [color="#666", fontname="Inter,Arial"];
+
+  /* ==== Main missed call workflow ==== */
+  WF_START  [label="MissedCallFollowupWorkflow\n(started after Call #1 missed)", fillcolor="#E1F5FE"];
+
+  WAIT1     [label="Wait 30 seconds", fillcolor="#FFF3E0"];
+  SMS1      [label="Send SMS #1\n\"I just tried calling...\nYou can text me here.\"", fillcolor="#E0F7FA"];
+
+  WAIT2     [label="Wait 25 seconds", fillcolor="#FFF3E0"];
+  CALL2     [label="Outbound Voice Call #2\n(Synthflow)", fillcolor="#E3F2FD"];
+  ANSW2     [label="Call #2 answered?", shape=diamond, style="rounded,filled", fillcolor="#FFF3E0"];
+
+  LIVE2     [label="Live Call Conversation\n(Cory + LLM guidance)", fillcolor="#FFFDE7"];
+  INTENT2   [label="LLM Intent Classification\n(ready / needs human /\ninterested-not-ready / not interested)", fillcolor="#FFFDE7"];
+
+  WAIT3     [label="Wait 30 seconds", fillcolor="#FFF3E0"];
+  SMS2      [label="Send SMS #2\n\"Following up — you\ncan reply or check email.\"", fillcolor="#E0F7FA"];
+
+  SMS_REPLY [label="Inbound SMS reply\n(within follow-up window?)", shape=diamond, style="rounded,filled", fillcolor="#FFF3E0"];
+  SMS_PATH  [label="AnswerWorkflow\n(RAG + LLM answer + routing)", fillcolor="#FFFDE7"];
+
+  SMART_NURT   [label="Enroll in Smart Nurture Campaigns\n(15 personalized emails)", fillcolor="#E8F5E9"];
+  COLD_NURT    [label="Enroll in Cold Nurture /\nLong-Term Re-engagement\n(3 emails, 60-day cycles)", fillcolor="#F3E5F5"];
+  ESC_ENROLL   [label="Escalate to Human\n+ Book Appointment\n(ready to enroll)", fillcolor="#FFEBEE"];
+  ESC_CLARIFY  [label="Escalate to Human\n+ Book Appointment\n(needs clarification)", fillcolor="#FFEBEE"];
+
+  /* ==== Wiring ==== */
+
+  WF_START -> WAIT1;
+  WAIT1    -> SMS1;
+  SMS1     -> WAIT2;
+  WAIT2    -> CALL2;
+
+  CALL2 -> ANSW2;
+
+  ANSW2 -> LIVE2      [label="yes"];
+  ANSW2 -> WAIT3      [label="no\n(voicemail / no answer)"];
+
+  LIVE2 -> INTENT2;
+
+  INTENT2 -> ESC_ENROLL  [label="ready to enroll"];
+  INTENT2 -> ESC_CLARIFY [label="needs human clarification"];
+  INTENT2 -> SMART_NURT  [label="interested but\nnot ready / undecided"];
+  INTENT2 -> COLD_NURT   [label="not interested"];
+
+  WAIT3 -> SMS2;
+  SMS2  -> SMS_REPLY;
+
+  SMS_REPLY -> SMS_PATH   [label="yes\n(student replies)"];
+  SMS_REPLY -> SMART_NURT [label="no reply\n(default)"];
+
+  SMS_PATH -> ESC_ENROLL  [label="ready to enroll"];
+  SMS_PATH -> ESC_CLARIFY [label="needs human clarification"];
+  SMS_PATH -> SMART_NURT  [label="interested but\nnot ready / undecided"];
+  SMS_PATH -> COLD_NURT   [label="not interested"];
+}

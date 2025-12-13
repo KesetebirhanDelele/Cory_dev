@@ -1,0 +1,57 @@
+digraph FallCampaign {
+  rankdir=LR;
+  node [shape=box, style="rounded,filled", fillcolor="#f7f7f9", color="#999", fontname="Inter,Arial"];
+  edge [color="#666", fontname="Inter,Arial"];
+
+  /* ==== Entry point: Fall 2025 Outreach ==== */
+  START   [label="Start: Fall 2025 Outreach\n(select next lead)", fillcolor="#E1F5FE"];
+  CALL1   [label="Outbound Voice Call #1\n(Synthflow)", fillcolor="#E3F2FD"];
+  ANSW1   [label="Call #1 answered?", shape=diamond, style="rounded,filled", fillcolor="#FFF3E0"];
+
+  /* ==== Live call branch ==== */
+  LIVE1   [label="Live Call Conversation\n(Cory + LLM guidance)", fillcolor="#FFFDE7"];
+  INTENT1 [label="LLM Intent Classification\n(ready / needs human /\ninterested-not-ready / not interested)", fillcolor="#FFFDE7"];
+
+  ESC_ENROLL   [label="Escalate to Human\n+ Book Appointment\n(ready to enroll)", fillcolor="#FFEBEE"];
+  ESC_CLARIFY  [label="Escalate to Human\n+ Book Appointment\n(needs clarification)", fillcolor="#FFEBEE"];
+  SMART_NURT   [label="Enroll in Smart Nurture Campaigns\n(15 personalized emails)", fillcolor="#E8F5E9"];
+  COLD_NURT    [label="Enroll in Cold Nurture /\nLong-Term Re-engagement\n(3 emails, 60-day cycles)", fillcolor="#F3E5F5"];
+
+  /* ==== Missed call branch ==== */
+  MISSED_FLOW  [label="Missed Call Flow\n(Temporal workflow)", fillcolor="#FFF3E0"];
+
+  /* ==== SMS reply → RAG answer builder ==== */
+  subgraph cluster_sms {
+    label="SMS Conversation (RAG-powered)";
+    color="#bdbdbd";
+    style="rounded";
+
+    SMS_IN    [label="Inbound SMS reply\n(from any SMS in flow)", fillcolor="#E0F7FA"];
+    ANSWERWF  [label="AnswerWorkflow\n(RAG + LLM answer + routing)", fillcolor="#FFFDE7"];
+    INTENT_SMS[label="LLM Intent Classification\n(ready / needs human /\ninterested-not-ready / not interested)", fillcolor="#FFFDE7"];
+  }
+
+  /* ==== Wiring ==== */
+
+  START -> CALL1;
+  CALL1 -> ANSW1;
+
+  ANSW1 -> LIVE1   [label="yes"];
+  ANSW1 -> MISSED_FLOW [label="no\n(voicemail / no answer)"];
+
+  LIVE1 -> INTENT1;
+
+  INTENT1 -> ESC_ENROLL  [label="ready to enroll"];
+  INTENT1 -> ESC_CLARIFY [label="needs human clarification"];
+  INTENT1 -> SMART_NURT  [label="interested but\nnot ready / undecided"];
+  INTENT1 -> COLD_NURT   [label="not interested"];
+
+  /* SMS reply path can enter from any SMS in the campaign */
+  SMS_IN -> ANSWERWF;
+  ANSWERWF -> INTENT_SMS;
+
+  INTENT_SMS -> ESC_ENROLL  [label="ready to enroll"];
+  INTENT_SMS -> ESC_CLARIFY [label="needs human clarification"];
+  INTENT_SMS -> SMART_NURT  [label="interested but\nnot ready / undecided"];
+  INTENT_SMS -> COLD_NURT   [label="not interested"];
+}

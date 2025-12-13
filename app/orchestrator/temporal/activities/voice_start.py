@@ -108,6 +108,7 @@ async def voice_start(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, 
                 "next_action": result.get("next_action"),
             },
         )
+        
         return {
             "channel": channel,
             "enrollment_id": enrollment_id,
@@ -137,3 +138,4 @@ async def voice_start(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, 
             "error": str(e),
             "request": payload,
         }
+
