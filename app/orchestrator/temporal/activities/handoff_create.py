@@ -26,6 +26,7 @@ else:
 # ✅ 2. Helpers for configuration
 # ---------------------------------------------------------------------------
 
+
 def _require_env(name: str) -> str:
     """Require an environment variable, fallback to .env if missing."""
     val = (os.getenv(name) or "").strip()
@@ -36,6 +37,7 @@ def _require_env(name: str) -> str:
     if not val:
         raise RuntimeError(f"Missing required env var: {name}")
     return val
+
 
 SUPABASE_URL = _require_env("SUPABASE_URL").rstrip("/")
 SUPABASE_KEY = (
@@ -71,7 +73,75 @@ def _org_id_from(body: Dict[str, Any]) -> str:
 
 
 def _db_payload_from_workflow(body: Dict[str, Any]) -> Dict[str, Any]:
-    """Shape the handoff record according to DB schema."""
+    """
+    Shape the handoff record according to DB schema.
+
+    This is the bridge between Temporal workflows (RAG / SMS / voice)
+    and the Supabase `handoffs` table.
+
+    Expected body keys (not all required):
+
+        {
+          "organization_id": "3333-...",
+          "workflow_run_id": "<Temporal workflow id>",
+          "channel": "sms" | "voice" | "email",
+          "subject": "Student ready to enroll",
+          "priority": "normal" | "high",
+          "assignee": "advisor@school.edu",
+
+          # Lead / contact / enrollment context
+          "lead_id": "<contact_id or lead_id in DB>",
+          "interaction_id": "<message.id or call.id>",
+          "enrollment_id": "<enrollment uuid>",
+
+          # Conversation / intent context
+          "intent": "ready_to_enroll" | "needs_human" | ...,
+          "next_action": "handoff_to_human" | ...,
+          "last_message": {
+              "text": "... full student message ...",
+              "channel": "sms",
+              "from": "+1...",
+          },
+
+          # Optional booking context (ticket 7)
+          "booking": {
+              "booking_link": "https://calendly.com/...",
+              "status": "link_sent" | "confirmed",
+              "appointment_time": "2025-09-01T15:00:00Z",
+          },
+
+          # Free-form payload (anything else you want to log)
+          "payload": { ... },
+
+          # Metadata
+          "created_by": "cory-system",
+          "timeout_seconds": 3600
+        }
+
+    Anything in `payload` is stored inside metadata.payload.
+    """
+    last_message = body.get("last_message") or {}
+    booking = body.get("booking") or {}
+
+    metadata: Dict[str, Any] = {
+        "channel": body.get("channel"),
+        "payload": body.get("payload") or {},
+        "created_by": body.get("created_by"),
+        "timeout_seconds": body.get("timeout_seconds"),
+        # Intent / routing context from RAG
+        "intent": body.get("intent"),
+        "next_action": body.get("next_action"),
+        # Conversation snapshot for the human
+        "last_message": last_message,
+        # Enrollment context (helps advisors see where in the flow this is)
+        "enrollment_id": body.get("enrollment_id"),
+        # Booking info (link or confirmed appointment)
+        "booking": booking,
+    }
+
+    # Clean out None values to avoid noisy JSON
+    metadata = {k: v for k, v in metadata.items() if v is not None}
+
     return {
         "organization_id": _org_id_from(body),
         "title": body.get("subject", "Manual Review"),
@@ -83,21 +153,49 @@ def _db_payload_from_workflow(body: Dict[str, Any]) -> Dict[str, Any]:
         "description": f"Channel={body.get('channel')}",
         "priority": body.get("priority", "normal"),
         "assigned_to": body.get("assignee"),
-        "metadata": {
-            "channel": body.get("channel"),
-            "payload": body.get("payload") or {},
-            "created_by": body.get("created_by"),
-            "timeout_seconds": body.get("timeout_seconds"),
-        },
+        "metadata": metadata,
     }
+
 
 # ---------------------------------------------------------------------------
 # ✅ 3. Activities
 # ---------------------------------------------------------------------------
 
+
 @activity.defn(name="create_handoff")
 async def create_handoff(body: Dict[str, Any]) -> str:
-    """Insert a new handoff row and return its id."""
+    """
+    Insert a new handoff row into Supabase and return its id.
+
+    Typical usage from a workflow when intent is "ready_to_enroll" or "needs_human":
+
+        handoff_id = await workflow.execute_activity(
+            create_handoff,
+            {
+                "organization_id": org_id,
+                "workflow_run_id": workflow.info().workflow_id,
+                "channel": "sms",
+                "subject": "Student ready to talk to advisor",
+                "priority": "high",
+                "lead_id": contact_id,
+                "enrollment_id": enrollment_id,
+                "interaction_id": message_id,
+                "intent": intent,
+                "next_action": next_action,
+                "last_message": {
+                    "text": "<student sms>",
+                    "channel": "sms",
+                    "from": from_number,
+                },
+                "booking": {
+                    "booking_link": "<optional link>",
+                    "status": "link_sent",
+                },
+                "payload": {...},
+            },
+            start_to_close_timeout=timedelta(seconds=30),
+        )
+    """
     if os.getenv("HANDOFF_FAKE_MODE") == "1":
         return str(uuid.uuid4())
 

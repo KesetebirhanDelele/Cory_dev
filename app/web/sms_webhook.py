@@ -84,7 +84,17 @@ def update_last_interaction(phone: str):
 # 📥 LOG INBOUND MESSAGE → message TABLE
 # --------------------------------------------------------------------------
 def log_inbound_message(phone: str, body: str, provider_ref: str):
-    # If Supabase is not configured, skip safely
+    """
+    Persist inbound SMS into public.message.
+
+    NOTE:
+      - AnswerWorkflow / RAG routing logic will later associate this inbound
+        message (via provider_ref / enrollment lookup) and decide:
+
+          • whether to auto-reply
+          • whether to escalate to a human
+          • whether to enroll into Smart Nurture or Cold Nurture campaigns
+    """
     global supabase
     if supabase is None:
         logger.warning("Supabase not configured — skipping inbound message logging")
@@ -157,7 +167,14 @@ async def _classify_and_update_campaign_step(
 ):
     """
     Use ConversationalResponseAgent to classify for CRM/campaign updates.
-    Does NOT send SMS; AnswerWorkflow handles replies.
+
+    IMPORTANT:
+      - This does NOT send SMS and does NOT decide nurture vs reengagement.
+      - Final routing (auto-reply, human handoff, Smart Nurture, Cold Nurture)
+        is handled by AnswerWorkflow + rag_route.
+
+      This helper is only for updating legacy CRM tables like lead_campaign_steps
+      with intent/next_action metadata.
     """
     if not inbound_text or not from_number or supabase is None:
         return None
@@ -242,6 +259,25 @@ async def sms_webhook(
     x_nonce: str = Header(None),
     x_hub_signature_256: str = Header(None),
 ):
+    """
+    Primary inbound SMS entrypoint.
+
+    Responsibilities:
+      1) Validate webhook signature (dev env: optional).
+      2) Normalize + log inbound SMS to public.message.
+      3) Apply STOP/START/HELP compliance and contact.consent updates.
+      4) Run a lightweight CRM classification (optional metadata only).
+      5) Perform idempotency gating.
+      6) Hand off to Temporal AnswerWorkflow via handle_inbound_sms:
+
+            AnswerWorkflow:
+              - runs RAG + LLM;
+              - extracts intent + next_action;
+              - invokes rag_route.route, which:
+                  • may auto-answer;
+                  • may create a handoff;
+                  • may enroll Smart Nurture / Cold Nurture campaigns.
+    """
     body_bytes = await request.body()
     print("SERVER RECEIVED BODY:", body_bytes.decode())
 
@@ -312,7 +348,7 @@ async def sms_webhook(
     update_last_interaction(normalized_from)
 
     # -------------------------------------------------
-    # 1) Classify for CRM / campaign updates (no SMS here)
+    # 1) Classify for CRM / legacy campaign metadata (no SMS here)
     # -------------------------------------------------
     await _classify_and_update_campaign_step(
         inbound_text=inbound_text,
@@ -327,11 +363,18 @@ async def sms_webhook(
         return {"status": "duplicate", "provider_ref": provider_ref}
 
     # -------------------------------------------------
-    # 3) Hand off to Temporal AnswerWorkflow (RAG + SMS reply)
+    # 3) Hand off to Temporal AnswerWorkflow (RAG + intent + routing)
     # -------------------------------------------------
     from temporalio.client import Client
 
     temporal_client: Client = request.app.state.temporal_client
+
+    logger.info(
+        "Inbound SMS → AnswerWorkflow: from=%s provider_ref=%s body=%r",
+        normalized_from,
+        provider_ref,
+        inbound_text[:160],
+    )
 
     await handle_inbound_sms(
         client=temporal_client,

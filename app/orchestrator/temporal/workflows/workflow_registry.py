@@ -29,7 +29,7 @@ WORKFLOWS = [
     BookAppointmentWorkflow,
 
     # SMS auto-reply workflow
-    SMSDirectReplyWorkflow,
+    # SMSDirectReplyWorkflow,
 
     # Matching workflows (used on ai-match-q)
     ProgramMatchWf,

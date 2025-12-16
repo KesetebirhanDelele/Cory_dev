@@ -1,4 +1,5 @@
 # app/channels/providers/voice.py
+
 """
 Synthflow Voice Provider Adapter
 -------------------------------------------
@@ -14,6 +15,7 @@ Now supports:
 
 - Automatic context variables:
     - org_id and enrollment_id are always injected into custom_variables
+    - campaign_id and reason_for_call can be passed explicitly
     - Any other keys in vars (except prompt/script/lead_name) are passed as
       custom_variables so they can be referenced in the Synthflow agent
       and in the webhook payload.
@@ -82,6 +84,8 @@ async def send_voice_call(
     to: str,
     *,
     vars: Optional[Dict[str, Any]] = None,
+    campaign_id: Optional[str] = None,
+    reason_for_call: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Initiate an outbound voice call via Synthflow API.
@@ -96,7 +100,12 @@ async def send_voice_call(
               - lead_name: student name for display
               - reason_for_call: short phrase for why Cory is calling
               - attempt: numeric attempt count (1, 2, ...)
+              - campaign_id: can also be provided here
               - any other keys -> forwarded as custom_variables
+        campaign_id: Optional explicit campaign_id (will be injected into vars/custom_variables
+                     if not already present).
+        reason_for_call: Optional explicit reason_for_call (will be injected into vars/custom_variables
+                         if not already present).
 
     Notes:
         - org_id and enrollment_id are ALWAYS added to custom_variables so that
@@ -109,12 +118,18 @@ async def send_voice_call(
     if not to:
         raise ValueError("❌ 'to' phone number is missing or invalid")
 
-    vars = vars or {}
+    # Make a copy so we don't mutate caller's dict
+    vars = dict(vars or {})
 
-    # Make sure key identifiers are always available inside the call context
-    # so they can be surfaced in webhooks and referenced by the agent.
+    # Ensure identifiers are always present
     vars.setdefault("org_id", org_id)
     vars.setdefault("enrollment_id", enrollment_id)
+
+    if campaign_id is not None and "campaign_id" not in vars:
+        vars["campaign_id"] = campaign_id
+
+    if reason_for_call is not None and "reason_for_call" not in vars:
+        vars["reason_for_call"] = reason_for_call
 
     callback_url: Optional[str] = None
     if CALLBACK_BASE_URL:

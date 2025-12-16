@@ -40,8 +40,7 @@ class SMSDirectReplyWorkflow:
             {
                 "to": to,
                 "body": body,
-                "project_id": None,  # auto-replies are not tied to a project
-                "send_reason": "inbound-auto-reply",
+                "skip_guards": True,   # Auto-reply always bypasses policy checks
             },
             schedule_to_close_timeout=timedelta(seconds=30),
         )
