@@ -1,4 +1,5 @@
 ﻿# app/orchestrator/temporal/activities/voice_start.py
+
 from temporalio import activity
 from typing import Dict, Any
 import logging
@@ -8,134 +9,177 @@ from app.data.supabase_repo import SupabaseRepo
 from app.policy.guards import evaluate_policy_guards
 from app.policy.guards_budget import evaluate_budget_caps
 from app.data.telemetry import log_decision_to_audit
-from app.data.db import supabase  # consistent with other activities
+from app.data.db import supabase
 
 logger = logging.getLogger(__name__)
 
 
 @activity.defn(name="voice_start")
-async def voice_start(enrollment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+async def voice_start(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Start an outbound or simulated voice conversation via Synthflow.
+    Fire-and-forget outbound voice call activity.
 
-    Handles policy and budget guards, runs the call through VoiceConversationAgent,
-    captures transcript + intent classification, and updates Supabase.
+    ✔ Policy + budget guards
+    ✔ Initiates provider call
+    ✔ Does NOT wait for transcript
+    ✔ Does NOT retry internally
+    ✔ Never blocks workflow
     """
 
-    channel = "voice"
-    lead = payload.get("lead", {})
-    org = payload.get("organization", {})
-    campaign_id = payload.get("campaign_id")
-    simulate = payload.get("simulate", False)
+    # --------------------------------------------------
+    # Validate payload EARLY
+    # --------------------------------------------------
+    enrollment_id = payload.get("enrollment_id")
     to = payload.get("to")
 
-    # --- Acquire DB / Repo --------------------------------------------------
-    db = supabase
-    supabase_repo = SupabaseRepo(db)
-
-    # --- Policy Guard Check -------------------------------------------------
-    allowed, reason = await evaluate_policy_guards(db, lead, org, channel)
-    if not allowed:
-        logger.info(
-            "SendBlockedPolicy",
-            extra={
-                "enrollment_id": enrollment_id,
-                "lead_id": lead.get("id"),
-                "channel": channel,
-                "reason": reason,
-            },
+    if not enrollment_id or not to:
+        logger.error(
+            "VoiceStartInvalidPayload",
+            extra={"payload": payload},
         )
-        await log_decision_to_audit(lead.get("id"), channel, reason)
         return {
-            "channel": channel,
-            "enrollment_id": enrollment_id,
-            "status": "blocked",
-            "reason": reason,
-            "stage": "policy_guard",
-            "request": payload,
+            "channel": "voice",
+            "status": "failed",
+            "error": "Missing enrollment_id or destination phone",
         }
 
-    # --- Budget / Rate Cap Check -------------------------------------------
+    channel = "voice"
+    skip_guards = payload.get("skip_guards", False)
+
+    lead = payload.get("lead") or {}
+    org = payload.get("organization") or {}
+    campaign_id = payload.get("campaign_id")
+    simulate = payload.get("simulate", False)
+
+    # --------------------------------------------------
+    # HARD REQUIREMENTS (THIS WAS MISSING)
+    # --------------------------------------------------
+    org_id = org.get("id")
+    lead_id = lead.get("id")
+
+    if not org_id or not lead_id:
+        logger.error(
+            "VoiceStartMissingContext",
+            extra={
+                "enrollment_id": enrollment_id,
+                "org": org,
+                "lead": lead,
+            },
+        )
+        return {
+            "channel": channel,
+            "status": "failed",
+            "error": "Missing organization.id or lead.id",
+        }
+
+    # --------------------------------------------------
+    # Acquire Repo
+    # --------------------------------------------------
+    supabase_repo = SupabaseRepo()
+
+    # --------------------------------------------------
+    # Policy Guard Check
+    # --------------------------------------------------
+    if not skip_guards:
+        allowed, reason = await evaluate_policy_guards(
+            supabase, lead, org, channel
+        )
+        if not allowed:
+            logger.info(
+                "VoiceBlockedPolicy",
+                extra={
+                    "enrollment_id": enrollment_id,
+                    "lead_id": lead_id,
+                    "reason": reason,
+                },
+            )
+            await log_decision_to_audit(lead_id, channel, reason)
+            return {
+                "channel": channel,
+                "enrollment_id": enrollment_id,
+                "status": "blocked",
+                "stage": "policy_guard",
+                "reason": reason,
+            }
+
+    # --------------------------------------------------
+    # Budget Guard Check
+    # --------------------------------------------------
     allowed, reason, hint = await evaluate_budget_caps(
-        db=db,
+        db=supabase,
         campaign_id=campaign_id,
         channel=channel,
         policy=org.get("policy", {}),
     )
+
     if not allowed:
         logger.info(
-            "SendBlockedBudget",
+            "VoiceBlockedBudget",
             extra={
                 "enrollment_id": enrollment_id,
                 "campaign_id": campaign_id,
-                "channel": channel,
                 "reason": reason,
                 "hint": hint,
             },
         )
-        await log_decision_to_audit(lead.get("id"), channel, reason)
+        await log_decision_to_audit(lead_id, channel, reason)
         return {
             "channel": channel,
             "enrollment_id": enrollment_id,
-            "campaign_id": campaign_id,
             "status": "blocked",
+            "stage": "budget_guard",
             "reason": reason,
             "hint": hint,
-            "stage": "budget_guard",
-            "request": payload,
         }
 
-    # --- Execute Voice Conversation ----------------------------------------
+    # --------------------------------------------------
+    # Fire-and-forget Voice Call (REAL ATTEMPT)
+    # --------------------------------------------------
     try:
         agent = VoiceConversationAgent(supabase_repo)
+
         result = await agent.start_call(
-            org_id=org.get("id"),
+            org_id=org_id,
             enrollment_id=enrollment_id,
             phone=to,
-            lead_id=lead.get("id"),
+            lead_id=lead_id,
             campaign_step_id=payload.get("campaign_step_id"),
             vars=payload.get("context", {}),
             simulate=simulate,
         )
 
-        # Combine result and return structured data
+        # 🔴 CRITICAL: do NOT lie about success
+        if result.get("status") != "initiated":
+            raise RuntimeError(f"Voice call not initiated: {result}")
+
+        provider_ref = result.get("provider_ref")
+
         logger.info(
-            "VoiceConversationCompleted",
+            "VoiceCallInitiated",
             extra={
                 "enrollment_id": enrollment_id,
-                "lead_id": lead.get("id"),
-                "intent": result.get("intent"),
-                "next_action": result.get("next_action"),
+                "lead_id": lead_id,
+                "provider_ref": provider_ref,
             },
         )
-        
+
         return {
             "channel": channel,
+            "status": "initiated",
+            "provider_ref": provider_ref,
             "enrollment_id": enrollment_id,
-            "lead_id": lead.get("id"),
-            "intent": result.get("intent"),
-            "next_action": result.get("next_action"),
-            "status": "completed",
-            "transcript_saved": True,
-            "request": payload,
         }
 
     except Exception as e:
-        logger.error(
-            "VoiceError",
-            extra={
-                "enrollment_id": enrollment_id,
-                "lead_id": lead.get("id"),
-                "error": str(e),
-            },
-            exc_info=True,
+        logger.exception(
+            "VoiceStartFailed",
+            extra={"enrollment_id": enrollment_id},
         )
+
+        # IMPORTANT: workflow continues, but failure is REAL
         return {
             "channel": channel,
-            "enrollment_id": enrollment_id,
-            "lead_id": lead.get("id"),
             "status": "failed",
+            "enrollment_id": enrollment_id,
             "error": str(e),
-            "request": payload,
         }
-

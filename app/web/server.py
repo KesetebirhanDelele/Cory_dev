@@ -24,6 +24,8 @@ else:
 import uvicorn
 from fastapi import FastAPI, Request  # noqa: F401  (Request is used in routers)
 
+from app.web.debug_sms import router as debug_sms_router
+
 from app.web.middleware import setup_middleware
 from app.web.idempotency_cache import IdempotencyCache
 from app.web.webhook import router as webhook_router
@@ -47,23 +49,44 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Cory Admissions Web API")
 
     # ----------------------------------------------------------
-    # 🌐 Temporal Client Initialization
+    # 🌐 Temporal Client Initialization (SAFE / OPTIONAL)
     # ----------------------------------------------------------
     from temporalio.client import Client
 
     @app.on_event("startup")
     async def startup_temporal():
+        """
+        Initialize Temporal client if enabled.
+
+        Controlled by env:
+          - TEMPORAL_ENABLED=1  → try to connect
+          - TEMPORAL_ENABLED!=1 → skip (app still starts)
+
+        Additionally:
+          - TEMPORAL_FAIL_HARD=1 → raise on failure (crash app)
+          - otherwise → log error, set client to None, keep app running
+        """
+        temporal_enabled = os.getenv("TEMPORAL_ENABLED", "0") == "1"
+        temporal_host = os.getenv("TEMPORAL_HOST_URL", "127.0.0.1:7233")
+        fail_hard = os.getenv("TEMPORAL_FAIL_HARD", "0") == "1"
+
+        if not temporal_enabled:
+            print("[SERVER] ⏭️ Skipping Temporal connect (TEMPORAL_ENABLED != 1)")
+            app.state.temporal_client = None
+            return
+
         try:
-            temporal_host = os.getenv("TEMPORAL_HOST_URL", "localhost:7233")
             print(f"[SERVER] Connecting to Temporal at {temporal_host} ...")
-
             app.state.temporal_client = await Client.connect(temporal_host)
-
             print("[SERVER] ✅ Temporal client connected")
-
         except Exception as e:
             print("🚨 TEMPORAL STARTUP FAILED:", e)
-            raise  # do NOT swallow errors silently
+            # Ensure attribute exists so downstream code can safely check for None
+            app.state.temporal_client = None
+            if fail_hard:
+                # Only crash the app if you explicitly opt in
+                raise
+            print("[SERVER] Continuing WITHOUT Temporal client (TEMPORAL_FAIL_HARD != 1)")
 
     # ----------------------------------------------------------
     # ROUTES & MIDDLEWARE
@@ -79,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(handoffs_router)
     app.include_router(kpi_router)
     app.include_router(metrics.router)
+    app.include_router(debug_sms_router)
 
     # ----------------------------------------------------------
     # HEALTH CHECK

@@ -8,8 +8,9 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Request
 from postgrest.exceptions import APIError
-from supabase import create_client
+from supabase import create_client, client
 from temporalio.client import Client
+from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from app.orchestrator.temporal.workflows.missed_call_followup import (
     MissedCallFollowupWorkflow,
@@ -362,13 +363,13 @@ async def receive_transcript(request: Request):
                 TEMPORAL_TASK_QUEUE,
             )
 
-            try:
-                client = await get_temporal_client()
-                workflow_id = f"missed-call-{provider_ref}"
+            # ✅ FIX 1 — deterministic workflow ID (THIS WAS MISSING)
+            workflow_id = f"missed-call-{enrollment_id}"
 
+            try:
                 await client.start_workflow(
                     MissedCallFollowupWorkflow.run,
-                    id=workflow_id,
+                    id=workflow_id,  # ← this stays deterministic
                     task_queue=TEMPORAL_TASK_QUEUE,
                     args=[
                         phone_for_followup,
@@ -381,11 +382,12 @@ async def receive_transcript(request: Request):
                     "[MissedCall] Started MissedCallFollowupWorkflow | workflow_id=%s",
                     workflow_id,
                 )
-            except Exception as wf_ex:  # noqa: BLE001
-                # We *never* fail the webhook if Temporal is unhappy.
-                log.exception(
-                    "[MissedCall] Failed to start MissedCallFollowupWorkflow: %s",
-                    wf_ex,
+
+            except WorkflowAlreadyStartedError:
+                # 🔒 IDENTITY GUARANTEE — duplicate webhook ignored
+                log.info(
+                    "[MissedCall] Workflow already started, ignoring duplicate webhook | workflow_id=%s",
+                    workflow_id,
                 )
         else:
             log.info(
