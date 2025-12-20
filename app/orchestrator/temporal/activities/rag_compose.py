@@ -1,4 +1,3 @@
-# app/orchestrator/temporal/activities/rag_compose.py
 from __future__ import annotations
 
 import json
@@ -75,21 +74,33 @@ def _score_chunk(chunk: Dict[str, Any], question: str) -> float:
     # 2) Intent-specific boosts
 
     # Registration / how to get started
-    if _any_in(q, ["register", "registration", "enroll", "enrollment", "apply", "application", "get started"]):
-        if _any_in(content, ["register", "registration", "enroll", "enrollment", "apply", "application"]):
+    if _any_in(
+        q,
+        ["register", "registration", "enroll", "enrollment", "apply", "application", "get started"],
+    ):
+        if _any_in(
+            content,
+            ["register", "registration", "enroll", "enrollment", "apply", "application"],
+        ):
             score += 5.0
         if _any_in(topic + " " + section, ["registration", "how_to_register"]):
             score += 3.0
 
     # Cost / tuition / payment
     if _any_in(q, ["cost", "price", "tuition", "pay", "payment", "fee", "fees"]):
-        if _any_in(content, ["tuition", "cost", "price", "payment", "installment", "pay", "fees"]):
+        if _any_in(
+            content,
+            ["tuition", "cost", "price", "payment", "installment", "pay", "fees"],
+        ):
             score += 5.0
         if _any_in(topic + " " + section, ["tuition", "financial", "financial_aid"]):
             score += 3.0
 
     # Programs / classes / courses
-    if _any_in(q, ["class", "classes", "course", "courses", "program", "programs", "bootcamp", "training"]):
+    if _any_in(
+        q,
+        ["class", "classes", "course", "courses", "program", "programs", "bootcamp", "training"],
+    ):
         if _any_in(
             content,
             [
@@ -198,9 +209,7 @@ async def compose_answer(args: Dict[str, Any]) -> Dict[str, Any]:
 
     # Collect clean snippets from chunk content
     snippets: List[str] = [
-        str(c.get("content", "")).strip()
-        for c in top
-        if c.get("content")
+        str(c.get("content", "")).strip() for c in top if c.get("content")
     ]
 
     if not snippets:

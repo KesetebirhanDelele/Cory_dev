@@ -5,7 +5,7 @@ appointment_book.py
 ----------------------------------------------------------
 Temporal activity wrapper around AppointmentSchedulerAgent.
 
-Used by BookAppointmentWorkflow to:
+Used by workflows (e.g. BookAppointmentWorkflow or human handoff flows) to:
 - Normalize input payload (IDs, scheduled time, notes, source)
 - Call AppointmentSchedulerAgent to create an appointment row
 - Link appointment back to enrollment
@@ -22,7 +22,8 @@ from typing import Any, Dict, Optional
 
 from temporalio import activity
 
-from app.agents.followup_scheduler_agent import FollowUpSchedulerAgent
+# NOTE: this is the correct agent for appointment booking
+from appointment_scheduler_agent import AppointmentSchedulerAgent
 
 
 def _parse_iso_datetime(value: Optional[str]) -> datetime:
@@ -42,11 +43,14 @@ def _parse_iso_datetime(value: Optional[str]) -> datetime:
         return dt
     except Exception:
         # Conservative fallback — log via activity logger and use now()
-        activity.logger.warning("Failed to parse scheduled_for_iso=%s; defaulting to now()", value)
+        activity.logger.warning(
+            "Failed to parse scheduled_for_iso=%s; defaulting to now()",
+            value,
+        )
         return datetime.now(timezone.utc)
 
 
-@activity.defn
+@activity.defn(name="book_appointment_activity")
 async def book_appointment_activity(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Temporal activity entry point.
@@ -56,12 +60,12 @@ async def book_appointment_activity(payload: Dict[str, Any]) -> Dict[str, Any]:
         registration_id: Optional[str] — enrollment.registration_id
         scheduled_for_iso: Optional[str] — ISO8601 datetime string
         notes: Optional[str] — notes for appointment
-        source: Optional[str] — origin label (e.g. "voice_ready_to_enroll")
+        source: Optional[str] — origin label (e.g. "voice_ready_to_enroll" or "sms_handoff")
 
     Returns:
         Dict with:
             {
-              "appointment": {...},  # row from public.appointments
+              "appointment": {...},  # row from public.appointments (includes booking link if applicable)
               "enrollment": {...},   # row from public.enrollment
             }
     """
@@ -74,19 +78,24 @@ async def book_appointment_activity(payload: Dict[str, Any]) -> Dict[str, Any]:
     source: str = payload.get("source", "voice_ready_to_enroll")
 
     if not enrollment_id and not registration_id:
-        raise ValueError("book_appointment_activity requires enrollment_id or registration_id")
+        raise activity.ApplicationError(
+            "book_appointment_activity requires enrollment_id or registration_id",
+            non_retryable=True,
+        )
 
     scheduled_for = _parse_iso_datetime(scheduled_for_iso)
 
     logger.info(
-        "📅 book_appointment_activity: booking appointment | enrollment_id=%s | registration_id=%s | when=%s | source=%s",
+        "📅 book_appointment_activity: booking appointment | enrollment_id=%s | "
+        "registration_id=%s | when=%s | source=%s",
         enrollment_id,
         registration_id,
         scheduled_for.isoformat(),
         source,
     )
 
-    agent = FollowUpSchedulerAgent()
+    # Instantiate the appointment scheduler agent and create the appointment
+    agent = AppointmentSchedulerAgent()
 
     result = await agent.schedule_from_enrollment(
         enrollment_id=enrollment_id,

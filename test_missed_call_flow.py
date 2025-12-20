@@ -1,118 +1,88 @@
 """
-End-to-end test for:
-- voice_start call attempt
-- missed-call SMS #1
-- 15 sec wait
-- retry call
-- missed-call SMS #2
+End-to-end test for MissedCallFollowupWorkflow.
 
-This simulates provider events so you can test
-WITHOUT Synthflow or Twilio.
+Flow:
+- start MissedCallFollowupWorkflow
+- send provider_event=no_answer (1st missed call)
+- wait a bit (to let workflow schedule SMS / retry)
+- send provider_event=no_answer again (retry missed)
+- print final result
+
+Requires:
+- temporal dev server running on localhost:7233
+- python -m app.orchestrator.temporal.worker running
 """
 
 import asyncio
-from temporalio.client import Client
-from temporalio.worker import Worker
 from datetime import timedelta
 
-# Your existing campaign workflow + activities
-from app.orchestrator.temporal.workflows.campaign import CampaignWorkflow
-from app.orchestrator.temporal.activities.voice_start import voice_start
-from app.orchestrator.temporal.activities.sms_send import sms_send
-from app.orchestrator.temporal.activities.email_send import email_send
+from temporalio.client import Client
+
+from app.orchestrator.temporal.workflows.missed_call_followup import (
+    MissedCallFollowupWorkflow,
+)
+
+# --------------------------------------------------------------------
+# Test constants – update phone numbers if you want
+# --------------------------------------------------------------------
+FROM_NUMBER = "+15714782790"   # student
+TO_NUMBER = "+16822812224"     # your Cory/Twilio number
+WORKFLOW_ID = "dev-missed-call-test-1"
+TASK_QUEUE = "cory-handoff-queue"   # same as TEMPORAL_COMM_TASK_QUEUE
 
 
-# ------------------------------
-# Test Configuration
-# ------------------------------
-
-TEST_WORKFLOW_ID = "test-missed-call-flow"
-TEST_TASK_QUEUE = "cory-test-queue"
-
-TEST_CAMPAIGN_ID = "TEST-CAMPAIGN"
-PHONE = "+15550001"
-
-
-# ------------------------------
-# Build a fake campaign sequence
-# ------------------------------
-STEPS = [
-    {
-        "action": "voice_start",
-        "payload": {
-            "to": PHONE,
-            "lead": {"id": "test-lead"},
-            "organization": {"id": "test-org"},
-            "campaign_id": TEST_CAMPAIGN_ID,
-            "campaign_step_id": "step-call-1",
-            "simulate": True,
-        },
-        "await_timeout_seconds": 5,    # simulate short timeout for testing
-        "context": {
-            "enrollment_id": "enroll-123",
-            "registration_id": "reg-123",
-            "campaign_step_id": "step-call-1",
-            "org_id": "test-org",
-            "project_id": "proj-123",
-            "phone": PHONE,
-        },
-    }
-]
-
-
-# ------------------------------
-# Test Execution
-# ------------------------------
-async def run_test():
+async def run_test() -> None:
+    print("🔌 Connecting to Temporal at localhost:7233 ...")
     client = await Client.connect("localhost:7233")
 
-    # Create a worker so activities resolve
-    worker = Worker(
-        client,
-        task_queue=TEST_TASK_QUEUE,
-        workflows=[CampaignWorkflow],
-        activities=[voice_start, sms_send, email_send],
+    # ----------------------------------------------------------------
+    # 1) Start the MissedCallFollowupWorkflow
+    #    NOTE: only TWO positional args to start_workflow:
+    #          (workflow, ...) and pass run args via args=[...]
+    # ----------------------------------------------------------------
+    print("🚀 Starting MissedCallFollowupWorkflow…")
+    handle = await client.start_workflow(
+        MissedCallFollowupWorkflow.run,
+        id=WORKFLOW_ID,
+        task_queue=TASK_QUEUE,
+        args=[FROM_NUMBER, TO_NUMBER, "no_answer"],
+        run_timeout=timedelta(minutes=5),
     )
 
-    async with worker:
-        # 1️⃣ Start workflow execution
-        print("🚀 Starting workflow…")
-        handle = await client.start_workflow(
-            CampaignWorkflow.run,
-            TEST_CAMPAIGN_ID,
-            STEPS,
-            id=TEST_WORKFLOW_ID,
-            task_queue=TEST_TASK_QUEUE,
-        )
+    print(f"✅ Started workflow: id={handle.id}, run_id={handle.run_id}")
 
-        # 2️⃣ Simulate no-answer for the first call
-        print("📡 Sending provider_event: no_answer")
-        await handle.signal(
-            "provider_event",
-            {"status": "no_answer", "data": {"intent": "no_answer"}}
-        )
+    # ----------------------------------------------------------------
+    # 2) Simulate first missed call
+    # ----------------------------------------------------------------
+    print("📡 Sending provider_event: no_answer (1st attempt)")
+    await handle.signal(
+        "provider_event",
+        {"status": "no_answer", "data": {"intent": "no_answer"}},
+    )
 
-        # 3️⃣ Wait for 5 seconds + 15-second internal sleep + retry call
-        print("⏳ Waiting for retry call to trigger…")
-        await asyncio.sleep(25)
+    print("⏳ Waiting ~20s for internal timers / SMS #1 …")
+    await asyncio.sleep(20)
 
-        # 4️⃣ Simulate no-answer AGAIN on retry
-        print("📡 Sending provider_event: no_answer (retry)")
-        await handle.signal(
-            "provider_event",
-            {"status": "no_answer", "data": {"intent": "no_answer"}}
-        )
+    # ----------------------------------------------------------------
+    # 3) Simulate second missed call (retry)
+    # ----------------------------------------------------------------
+    print("📡 Sending provider_event: no_answer (2nd attempt)")
+    await handle.signal(
+        "provider_event",
+        {"status": "no_answer", "data": {"intent": "no_answer"}},
+    )
 
-        print("⏳ Waiting for SMS #2…")
-        await asyncio.sleep(5)
+    print("⏳ Waiting a few seconds for SMS #2 / completion …")
+    await asyncio.sleep(10)
 
-        # 5️⃣ Final result
-        result = await handle.result()
-        print("\n\n==================== FINAL WORKFLOW RESULT ====================")
-        print(result)
-        print("===============================================================\n")
-
-        print("🎉 Test completed successfully!")
+    # ----------------------------------------------------------------
+    # 4) Wait for result and print
+    # ----------------------------------------------------------------
+    result = await handle.result()
+    print("\n==================== FINAL WORKFLOW RESULT ====================")
+    print(result)
+    print("===============================================================\n")
+    print("🎉 Missed-call test completed")
 
 
 if __name__ == "__main__":

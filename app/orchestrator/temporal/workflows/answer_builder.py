@@ -39,7 +39,23 @@ class _Event:
 
 @workflow.defn(name="AnswerWorkflow")
 class AnswerWorkflow:
-    """Workflow for RAG-based SMS conversation."""
+    """
+    Workflow for RAG-based SMS conversation.
+
+    Flow:
+      - For each inbound SMS:
+          1) Run RAG (retrieve → compose → redact).
+          2) Summarize answer for SMS and classify:
+               • intent ∈ {"ready_to_enroll", "needs_human",
+                           "interested_not_ready", "not_interested", ...}
+               • next_action ∈ {"handoff_to_human", "enroll_smart_nurture",
+                                "enroll_cold_nurture", "answer_only", ...}
+          3) Call rag_route.route with (answer, confidence, intent, next_action).
+          4) Send SMS reply to the user.
+
+    The actual campaign routing (Smart Nurture vs Cold Nurture vs handoff)
+    is implemented inside rag_route, which uses these signals.
+    """
 
     def __init__(self) -> None:
         # All inbound SMS payloads for this thread
@@ -55,11 +71,12 @@ class AnswerWorkflow:
         Handle inbound SMS from webhook.
 
         Expected payload (from sms_query_handler):
+
             {
                 "from": "+15551234567",
                 "to": "+1....",
                 "body": "text from user",
-                "inbound_id": "provider msg id",
+                "inbound_id": "<provider msg id or conversation key>",
                 ...
             }
         """
@@ -143,8 +160,14 @@ class AnswerWorkflow:
         Main conversation loop:
 
         - Build answer for the first query (RAG) and summarize for SMS.
-        - Route to outbox / handoff with intent + next_action.
+        - Route to outbox / handoff / nurture via rag_route (intent-aware).
         - Then wait for new SMS signals and do the same for each follow-up.
+
+        Args:
+            query: initial inbound SMS text
+            from_number: E.164 phone number
+            inbound_id: conversation / inbound provider reference
+            threshold: confidence threshold for auto-answers
         """
         workflow.logger.info(
             "🧠 Starting AnswerWorkflow | from=%s | query=%s",
@@ -152,11 +175,11 @@ class AnswerWorkflow:
             query,
         )
 
-        # ==============================================================
+        # ============================================================== 
         # 1️⃣ INITIAL MESSAGE
         # ==============================================================
 
-        # Run RAG pipeline (no routing yet)
+        # Run RAG pipeline
         rag_result = await self._build_answer(query, threshold)
         rag_answer = rag_result["answer"]
         rag_confidence = float(rag_result.get("confidence", 0.0))
@@ -185,14 +208,15 @@ class AnswerWorkflow:
             rag_confidence,
         )
 
-        # 4️⃣ Route to outbox / handoff with intent + next_action
+        # 4️⃣ Route to campaign engine (handoff / nurture / reengagement)
         route_input: Dict[str, Any] = {
             "answer": rag_answer,
-            "inbound_msg_id": inbound_id,
+            "inbound_msg_id": inbound_id,  # used by rag_route for idempotency + lookup
             "confidence": rag_confidence,
             "threshold": float(threshold),
             "intent": intent,
             "next_action": next_action,
+            # NOTE: if we add enrollment_id in the future, we can also pass it here.
         }
         await workflow.execute_activity(
             route,
@@ -200,7 +224,7 @@ class AnswerWorkflow:
             start_to_close_timeout=timedelta(seconds=30),
         )
 
-        # Optional tweak for handoff: make SMS mention advisor if LLM recommended
+        # Optional tweak for handoff: make SMS mention advisor if LLM requested human
         if next_action == "handoff_to_human" or rag_confidence < threshold:
             if "advisor" not in sms_body.lower():
                 sms_body = (
@@ -216,9 +240,9 @@ class AnswerWorkflow:
         )
         workflow.logger.info("📤 Initial RAG/SMS answer sent to %s", from_number)
 
-        # ==============================================================
+        # ============================================================== 
         # 2️⃣ CONVERSATION LOOP – handle follow-up SMS
-        # ==============================================================
+        # ============================================================== 
         workflow.logger.info("✅ Waiting for follow-up SMS...")
         result: Dict[str, Any] = {
             "last_answer": rag_answer,
@@ -281,7 +305,7 @@ class AnswerWorkflow:
             # Route again with updated intent / next_action
             follow_route_input: Dict[str, Any] = {
                 "answer": follow_answer,
-                "inbound_msg_id": inbound_id,  # same conversation/thread id
+                "inbound_msg_id": inbound_id,  # same thread key for this conversation
                 "confidence": follow_confidence,
                 "threshold": float(threshold),
                 "intent": follow_intent,
@@ -293,6 +317,7 @@ class AnswerWorkflow:
                 start_to_close_timeout=timedelta(seconds=30),
             )
 
+            # Advisor/handoff hint for follow-up answers
             if follow_next_action == "handoff_to_human" or follow_confidence < threshold:
                 if "advisor" not in follow_sms_body.lower():
                     follow_sms_body = (
@@ -307,7 +332,7 @@ class AnswerWorkflow:
             )
             workflow.logger.info("📤 Sent follow-up RAG/SMS answer to %s", follow_from)
 
-            # Keep last result in case caller inspects workflow completion later
+            # Keep last result for potential inspection
             result = {
                 "last_answer": follow_answer,
                 "last_intent": follow_intent,

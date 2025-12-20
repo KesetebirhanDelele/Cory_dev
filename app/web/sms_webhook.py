@@ -331,14 +331,21 @@ async def sms_webhook(
     # -------------------------------------------------
     from temporalio.client import Client
 
-    temporal_client: Client = request.app.state.temporal_client
+    temporal_client: Client | None = getattr(request.app.state, "temporal_client", None)
 
-    await handle_inbound_sms(
-        client=temporal_client,
-        from_number=normalized_from,
-        body=inbound_text,
-        provider_ref=provider_ref,
-        threshold=0.5,
-    )
+    if temporal_client is not None:
+        await handle_inbound_sms(
+            client=temporal_client,
+            from_number=normalized_from,
+            body=inbound_text,
+            provider_ref=provider_ref,
+            threshold=0.5,
+        )
+    else:
+        logger.warning(
+            "[SMS_WEBHOOK] No Temporal client available; skipping AnswerWorkflow handoff"
+        )
 
     return {"status": "received", "provider_ref": provider_ref}
+
+

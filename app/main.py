@@ -12,19 +12,15 @@ from fastapi import FastAPI
 from app.web.webhook import router as webhook_router
 
 from app.web.sms_webhook import router as sms_router
+from dotenv import load_dotenv
+load_dotenv()
+print("TEMPORAL_COMM_TASK_QUEUE =", os.getenv("TEMPORAL_COMM_TASK_QUEUE"))
 
 app = FastAPI(title="Cory API")
 app.include_router(sms_router)
 
 # Mount the webhook routes
 app.include_router(webhook_router)
-
-# Optional: load .env if present
-try:
-    from dotenv import load_dotenv  # pip install python-dotenv
-    load_dotenv()
-except Exception:
-    pass
 
 # ---- Config (env overrides) -------------------------------------------------
 ACTIONS_INTERVAL_SEC   = int(os.getenv("ACTIONS_INTERVAL_SEC", "60"))   # v_due_actions → route work

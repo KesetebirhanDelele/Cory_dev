@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from typing import Any, Dict
-
 import logging
+
 from temporalio import activity
 
 # Re-use the same asyncpg pool helper as other DB-using activities
@@ -12,11 +12,15 @@ from app.orchestrator.temporal.activities.rag import _get_pool
 log = logging.getLogger("cory.activities.nurture_enroll")
 
 """
-Nurture Enrollment Activity
----------------------------
+Nurture / Re-engagement Enrollment Activity
+-------------------------------------------
 
-This activity enrolls an existing enrollment into a *secondary* campaign
-(e.g. Smart Nurture with 15 follow-up emails).
+This activity enrolls an existing enrollment into a *secondary* campaign,
+such as:
+
+  - Smart Nurture (15-email sequence for interested-but-undecided leads)
+  - Cold Nurture / Long-Term Re-engagement (3-email, 60-day cycles for
+    not-interested or dormant leads)
 
 It writes to `campaign_enrollments`:
 
@@ -39,11 +43,9 @@ Usage (from a workflow, for example MissedCallFollowupWorkflow):
         nurture_enroll,
         args=[{
             "enrollment_id": enrollment_id,
-            # Smart Nurture campaign UUID (configured in DB or settings)
             "campaign_id": SMART_NURTURE_CAMPAIGN_ID,
-            # Optional overrides:
-            # "campaign_type": "nurture",
-            # "tier": "tier1",
+            "campaign_type": "nurture",      # or "reengagement"
+            "tier": "tier1",
         }],
         start_to_close_timeout=timedelta(seconds=30),
     )
@@ -57,9 +59,9 @@ async def nurture_enroll(args: Dict[str, Any]) -> Dict[str, Any]:
 
     Expected args:
         {
-            "enrollment_id": str,          # required
-            "campaign_id": str,            # required (the nurture campaign ID)
-            "campaign_type": str = "nurture",
+            "enrollment_id": str,      # required
+            "campaign_id": str,        # required (Smart Nurture or Cold Nurture campaign)
+            "campaign_type": str = "nurture",   # "nurture" or "reengagement"
             "tier": str = "tier1",
         }
 
@@ -71,6 +73,7 @@ async def nurture_enroll(args: Dict[str, Any]) -> Dict[str, Any]:
     """
 
     enrollment_id = args.get("enrollment_id")
+    # Allow legacy "nurture_campaign_id" key just in case
     campaign_id = args.get("campaign_id") or args.get("nurture_campaign_id")
     campaign_type = args.get("campaign_type") or "nurture"
     tier = args.get("tier") or "tier1"
@@ -82,7 +85,7 @@ async def nurture_enroll(args: Dict[str, Any]) -> Dict[str, Any]:
         )
     if not campaign_id:
         raise activity.ApplicationError(
-            "nurture_enroll: missing campaign_id (nurture campaign)",
+            "nurture_enroll: missing campaign_id (nurture/reengagement campaign)",
             non_retryable=True,
         )
 

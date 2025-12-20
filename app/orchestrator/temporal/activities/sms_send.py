@@ -18,8 +18,7 @@ async def sms_send(args: Dict[str, Any]) -> Dict[str, Any]:
     """
     Temporal activity: send an SMS message via Cory's configured provider.
 
-    This activity now follows the "single dict arg" pattern required by the
-    Temporal SDK in your environment.
+    We always receive a single dict `args` (Temporal Python SDK requirement).
 
     Supported call shapes:
 
@@ -34,26 +33,26 @@ async def sms_send(args: Dict[str, Any]) -> Dict[str, Any]:
              "organization": {...},
              "campaign_id": "CAMP123",
              "idempotency_key": "optional-key"
-         }
+         },
+         "skip_guards": False,   # optional
        }
 
     2) Lightweight direct send (e.g. auto-replies from AnswerWorkflow):
 
        args = {
          "to": "+15551234567",
-         "body": "Thanks for your message!"
+         "body": "Thanks for your message!",
+         "skip_guards": True,    # typically True here
        }
-
-       In this case, policy/budget guards and outbound logging are skipped,
-       since we don't have enrollment / lead / org context.
     """
 
-    # Decide which calling convention is being used
     enrollment_id = args.get("enrollment_id")
+    skip_guards = bool(args.get("skip_guards"))
+
+    # If caller passed a nested payload use that, otherwise treat args as payload
     if "payload" in args:
         payload: Dict[str, Any] = args.get("payload") or {}
     else:
-        # Treat the whole args dict as the payload for lightweight sends
         payload = args
 
     channel = "sms"
@@ -67,17 +66,18 @@ async def sms_send(args: Dict[str, Any]) -> Dict[str, Any]:
         )
 
     activity.logger.info(
-        "📨 [SMS_SEND] starting send | enrollment=%s | to=%s",
+        "📨 [SMS_SEND] starting send | enrollment=%s | to=%s | skip_guards=%s",
         enrollment_id,
         to,
+        skip_guards,
     )
 
     lead = payload.get("lead") or {}
     org = payload.get("organization") or {}
     campaign_id = payload.get("campaign_id")
 
-    # Only run guards when we have some campaign/enrollment context
-    run_guards = bool(enrollment_id or lead or org or campaign_id)
+    # Only run guards when we have context and caller didn't explicitly skip
+    run_guards = (not skip_guards) and bool(enrollment_id or lead or org or campaign_id)
 
     if run_guards:
         # --- Policy Guard (quiet hours, consent, etc.) ---
@@ -128,7 +128,15 @@ async def sms_send(args: Dict[str, Any]) -> Dict[str, Any]:
         # Log outbound record in Supabase only when we have an enrollment_id
         if enrollment_id:
             try:
-                await repo.log_outbound(enrollment_id, channel, provider_ref)
+                # NOTE: not all branches of your repo have this helper; log failure but don't crash.
+                if hasattr(repo, "log_outbound"):
+                    await repo.log_outbound(enrollment_id, channel, provider_ref)
+                else:
+                    activity.logger.warning(
+                        "⚠️ supabase_repo.log_outbound missing; "
+                        "skipping outbound logging for enrollment=%s",
+                        enrollment_id,
+                    )
             except Exception as ex:
                 activity.logger.warning(f"⚠️ Failed to log outbound SMS: {ex}")
 

@@ -31,6 +31,7 @@ from app.web.sms_webhook import router as sms_router
 from app.web.email_webhook import router as email_router
 from app.web.voice_webhook import router as voice_router
 from app.web.wa_webhook import router as wa_router
+from app.web.voice_rag_answer import router as voice_rag_router
 from app.web.routes_handoffs import router as handoffs_router
 from app.web.routes_kpi import router as kpi_router
 from app.web import metrics
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(sms_router)
     app.include_router(email_router)
     app.include_router(voice_router)
+    app.include_router(voice_rag_router)
     app.include_router(wa_router)
     app.include_router(handoffs_router)
     app.include_router(kpi_router)
