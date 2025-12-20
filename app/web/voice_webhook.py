@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Request
 from postgrest.exceptions import APIError
-from supabase import create_client, client
+from supabase import create_client
 from temporalio.client import Client
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
@@ -150,11 +150,8 @@ def _lookup_smart_nurture_campaign_id(org_id: Optional[str]) -> Optional[str]:
       - settings->>'kind' = 'smart_nurture'
 
     Returns the campaign.id or None if not found.
-
-    NOTE: This is *optional* and only used when org_id is present.
     """
     if not org_id:
-        # We silently skip lookup when org_id is missing; this is not an error.
         log.info("[NurtureLookup] Skipping Smart Nurture lookup, no org_id provided.")
         return None
 
@@ -249,11 +246,9 @@ async def receive_transcript(request: Request):
 
     # ---------- Status / missed-call detection ----------
 
-    # Normalize status so it lines up with VoiceConversationAgent._collect_transcript
     raw_status = call.get("status") or data.get("status", "completed")
     normalized_status = "complete" if raw_status == "completed" else str(raw_status)
 
-    # Synthflow can put "no_answer", "voicemail", etc. in different places
     call_result = (
         call.get("result")
         or call.get("disposition")
@@ -270,7 +265,6 @@ async def receive_transcript(request: Request):
     )
     is_missed_call = base_missed or substring_missed
 
-    # Parsed status value we want to store
     status = call_result or normalized_status
 
     log.info(
@@ -288,7 +282,6 @@ async def receive_transcript(request: Request):
     )
 
     # ---------- Derive phone for follow-up ----------
-    # We try a few locations and simply skip the workflow if we never get a phone.
     phone_for_followup = (
         lead_phone
         or custom_vars.get("phone")
@@ -321,9 +314,7 @@ async def receive_transcript(request: Request):
         "channel": "voice",
         "direction": "inbound",
         "provider_ref": provider_ref,
-        # Single status column that actually exists in `message`
         "status": status,
-        # JSONB payload
         "content": content,
         "transcript": transcript,
         "audio_url": audio_url,
@@ -348,7 +339,6 @@ async def receive_transcript(request: Request):
 
         # --- 🔥 Start Temporal missed-call workflow (optional fields tolerated) ---
         if is_missed_call and phone_for_followup:
-            # Only look up Smart Nurture if we actually have an org_id.
             nurture_campaign_id = _lookup_smart_nurture_campaign_id(org_id)
 
             log.info(
@@ -363,13 +353,14 @@ async def receive_transcript(request: Request):
                 TEMPORAL_TASK_QUEUE,
             )
 
-            # ✅ FIX 1 — deterministic workflow ID (THIS WAS MISSING)
+            # Deterministic workflow ID so duplicate webhooks don't double-enroll
             workflow_id = f"missed-call-{enrollment_id}"
 
             try:
-                await client.start_workflow(
+                temporal_client = await get_temporal_client()
+                await temporal_client.start_workflow(
                     MissedCallFollowupWorkflow.run,
-                    id=workflow_id,  # ← this stays deterministic
+                    id=workflow_id,
                     task_queue=TEMPORAL_TASK_QUEUE,
                     args=[
                         phone_for_followup,
@@ -384,9 +375,9 @@ async def receive_transcript(request: Request):
                 )
 
             except WorkflowAlreadyStartedError:
-                # 🔒 IDENTITY GUARANTEE — duplicate webhook ignored
                 log.info(
-                    "[MissedCall] Workflow already started, ignoring duplicate webhook | workflow_id=%s",
+                    "[MissedCall] Workflow already started, ignoring duplicate webhook | "
+                    "workflow_id=%s",
                     workflow_id,
                 )
         else:

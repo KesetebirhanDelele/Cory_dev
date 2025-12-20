@@ -1,5 +1,3 @@
-# app/agents/voice_conversation_agent.py
-
 """
 VoiceConversationAgent
 ----------------------------------------------------------
@@ -14,8 +12,8 @@ Responsibilities are now EXPLICITLY split:
 
 2. facilitate_call_from_campaign()
    - Campaign-driven calls
-   - May wait for transcript
-   - Classifies intent
+   - Waits for transcript (when not simulated)
+   - Classifies intent based on the conversation
    - Drives downstream automation
 """
 
@@ -58,7 +56,6 @@ class VoiceConversationAgent:
         ❌ NO blocking
         ❌ NO retries
         """
-
         vars = vars or {}
 
         log.info(
@@ -153,7 +150,6 @@ class VoiceConversationAgent:
         context = generated_msg.get("context", {}) or {}
         campaign_ctx = context.get("campaign", {}) or {}
         lead_ctx = context.get("lead", {}) or {}
-        enrollment_ctx = context.get("enrollment", {}) or {}
 
         outbound_text = generated_msg.get(
             "message_text",
@@ -167,7 +163,11 @@ class VoiceConversationAgent:
 
         log.info(
             "📢 Campaign voice call initiated",
-            extra={"lead_id": lead_id, "campaign": campaign_ctx.get("name")},
+            extra={
+                "lead_id": lead_id,
+                "step_id": step_id,
+                "campaign": campaign_ctx.get("name"),
+            },
         )
 
         # -------------------------
@@ -200,22 +200,32 @@ class VoiceConversationAgent:
 
                 transcript = await self._collect_transcript(provider_ref)
 
-            except Exception as e:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 log.exception("❌ Campaign voice call failed")
                 transcript = (
                     f"agent: {outbound_text}\n"
-                    "lead: Missed the call."
+                    "lead: Missed the call or no transcript available."
                 )
 
+        # -------------------------
+        # 💬 CLASSIFICATION INPUT
+        # -------------------------
+        # For now we classify on the full transcript. In a future iteration
+        # you can swap this to a RAG-grounded summary produced by a workflow.
+        text_for_classification = transcript or outbound_text
+
         classification = await self.conv_agent.classify_message(
-            transcript,
+            text_for_classification,
             channel="voice",
         )
 
         await self._persist_results(step_id, transcript, classification)
         await self._notify_workflow(lead_id, classification)
 
-        log.info("✅ Campaign voice interaction completed", extra={"lead_id": lead_id})
+        log.info(
+            "✅ Campaign voice interaction completed",
+            extra={"lead_id": lead_id, "step_id": step_id},
+        )
         return classification
 
     # ======================================================
