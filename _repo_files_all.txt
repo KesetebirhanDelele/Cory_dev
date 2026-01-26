@@ -2,16 +2,7 @@
 .githooks
 .githooks\commit-msg
 .gitignore
-.pytest_cache
-.pytest_cache\.gitignore
-.pytest_cache\CACHEDIR.TAG
-.pytest_cache\README.md
-.pytest_cache\v
-.pytest_cache\v\cache
-.pytest_cache\v\cache\lastfailed
-.pytest_cache\v\cache\nodeids
-.pytest_cache\v\cache\stepwise
-_repo_files_all.txt
+
 app
 app\__init__.py
 app\agents
@@ -143,6 +134,7 @@ app\web\voice_webhook.py
 app\web\wa_webhook.py
 app\web\webhook.py
 appointment_scheduler_agent.py
+
 backups
 backups\cory_backup.dump
 backups\cory_backup_20251014_151120.dump
